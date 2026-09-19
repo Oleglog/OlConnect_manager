@@ -161,6 +161,16 @@ function renderBrandLogo(sz) {
   '</div>';
 }
 
+function randHex(bytes = 32) {
+  const arr = new Uint8Array(bytes);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(arr);
+  } else {
+    for (let i = 0; i < bytes; i++) arr[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
+}
+
 function fmtStatusDot(st) {
   const map = { running: 'status-running', active: 'status-running', failed: 'status-failed' };
   return map[st] || 'status-inactive';
@@ -835,6 +845,19 @@ function renderInstanceCard(inst, context = {}) {
       : 'Обновите общий WB-токен в Настройках';
     badges.appendChild(expiredBadge);
   }
+  if (inst.carrier === 'openflux') {
+    if (inst.has_openflux_key) {
+      const encBadge = el('span', 'badge badge-emerald');
+      encBadge.innerHTML = icon('lock', 12) + '<span>AES-256-GCM</span>';
+      encBadge.title = 'Шифрование OpenFlux включено (AES-256-GCM)';
+      badges.appendChild(encBadge);
+    } else {
+      const noEncBadge = el('span', 'badge');
+      noEncBadge.innerHTML = icon('unlock', 12) + '<span>без шифрования</span>';
+      noEncBadge.title = 'Шифрование OpenFlux отключено. Для включения укажите ключ в настройках инстанса';
+      badges.appendChild(noEncBadge);
+    }
+  }
   if (inst.uptime) {
     const upBadge = el('span', 'badge');
     upBadge.innerHTML = icon('clock', 12) + '<span>' + inst.uptime + '</span>';
@@ -844,12 +867,15 @@ function renderInstanceCard(inst, context = {}) {
 
   // Room ID + Client ID rows
   const meta = el('div', 'space-y-1.5 text-xs');
-  meta.appendChild(metaRow('Room ID', inst.room_id || '—', inst.room_id));
+  meta.appendChild(metaRow(inst.carrier === 'openflux' ? 'Ссылка на документ' : 'Room ID', inst.room_id || '—', inst.room_id));
   if (inst.client_id) {
     meta.appendChild(metaRow('Client ID', inst.client_id, inst.client_id));
   }
   if (inst.has_auth_token) {
     meta.appendChild(metaRow('Auth token', 'задан', 'QR включает токен для импорта полного профиля'));
+  }
+  if (inst.carrier === 'openflux') {
+    meta.appendChild(metaRow('Шифрование', inst.has_openflux_key ? 'AES-256-GCM' : 'отключено', inst.has_openflux_key ? 'Ключ включён в QR и URI (&k=...)' : ''));
   }
   card.appendChild(meta);
 
@@ -2220,6 +2246,51 @@ function showCreateInstanceModal() {
   connGrid.appendChild(authTokenField.field);
   connectionSec.appendChild(connGrid);
 
+  const openfluxKeySec = el('div', 'p-3 mt-3 rounded-lg border border-gray-700 bg-gray-800/30 hidden');
+  openfluxKeySec.innerHTML = '<div class="text-xs text-gray-400 mb-2 flex items-center gap-1.5">' + icon('lock', 12) + '<span>Шифрование OpenFlux (AES-256-GCM)</span></div>';
+  const openfluxKeyRow = el('div', 'flex gap-2 items-center');
+  const openfluxKeyInput = el('input', 'input flex-1 font-mono text-xs');
+  openfluxKeyInput.type = 'password';
+  openfluxKeyInput.placeholder = 'Секретный ключ (опционально, от 16 символов)';
+  const toggleKeyVisBtn = el('button', 'btn btn-secondary btn-sm p-2 shrink-0');
+  toggleKeyVisBtn.type = 'button';
+  toggleKeyVisBtn.title = 'Показать / скрыть ключ';
+  toggleKeyVisBtn.innerHTML = icon('eye', 14);
+  toggleKeyVisBtn.onclick = () => {
+    if (openfluxKeyInput.type === 'password') {
+      openfluxKeyInput.type = 'text';
+      toggleKeyVisBtn.innerHTML = icon('eye-off', 14);
+    } else {
+      openfluxKeyInput.type = 'password';
+      toggleKeyVisBtn.innerHTML = icon('eye', 14);
+    }
+  };
+  const genKeyBtn = el('button', 'btn btn-secondary btn-sm flex items-center gap-1 shrink-0');
+  genKeyBtn.type = 'button';
+  genKeyBtn.title = 'Сгенерировать случайный 256-битный ключ';
+  genKeyBtn.innerHTML = icon('refresh-cw', 12) + '<span>Сгенерировать</span>';
+  genKeyBtn.onclick = () => {
+    openfluxKeyInput.value = randHex(32);
+    openfluxKeyInput.type = 'text';
+    toggleKeyVisBtn.innerHTML = icon('eye-off', 14);
+  };
+  const clearKeyBtn = el('button', 'btn btn-secondary btn-sm p-2 shrink-0');
+  clearKeyBtn.type = 'button';
+  clearKeyBtn.title = 'Очистить ключ';
+  clearKeyBtn.innerHTML = icon('trash-2', 14);
+  clearKeyBtn.onclick = () => {
+    openfluxKeyInput.value = '';
+  };
+  openfluxKeyRow.appendChild(openfluxKeyInput);
+  openfluxKeyRow.appendChild(toggleKeyVisBtn);
+  openfluxKeyRow.appendChild(genKeyBtn);
+  openfluxKeyRow.appendChild(clearKeyBtn);
+  openfluxKeySec.appendChild(openfluxKeyRow);
+  const openfluxKeyHint = el('div', 'mt-1.5 text-xs text-gray-500');
+  openfluxKeyHint.textContent = 'Если ключ указан, exit-node и клиенты шифруют весь трафик по AES-256-GCM. Ключ автоматически добавится в QR-код и ссылку (&k=...).';
+  openfluxKeySec.appendChild(openfluxKeyHint);
+  connectionSec.appendChild(openfluxKeySec);
+
   const dcWarn = el('div', 'p-2 mb-3 text-xs rounded border border-red-500/50 bg-red-500/10 text-red-200 hidden');
   dcWarn.innerHTML = '<strong>Внимание:</strong> DataChannel может не работать с данным carrier. Рекомендуется <b>vp8channel</b>.';
   connectionSec.appendChild(dcWarn);
@@ -2339,11 +2410,12 @@ function showCreateInstanceModal() {
     wbHint.classList.toggle('hidden', c !== 'wbstream');
     wbAcquireBtn.classList.toggle('hidden', c !== 'wbstream');
     jitsiPresets.classList.toggle('hidden', c !== 'jitsi');
+    openfluxKeySec.classList.toggle('hidden', c !== 'openflux');
 
     if (c === 'openflux') {
       const lbl = roomIDField.field.querySelector('label');
-      if (lbl && lbl.lastChild) lbl.lastChild.textContent = ' Ссылка на документ (Yandex Docs)';
-      roomIDField.input.placeholder = 'https://disk.yandex.ru/i/... или https://docs.yandex.ru/...';
+      if (lbl && lbl.lastChild) lbl.lastChild.textContent = ' Ссылка на документ (Yandex / Mail.ru Docs)';
+      roomIDField.input.placeholder = 'https://disk.yandex.ru/i/... или https://docs.mail.ru/...';
     } else {
       const lbl = roomIDField.field.querySelector('label');
       if (lbl && lbl.lastChild) lbl.lastChild.textContent = ' Room ID';
@@ -2378,7 +2450,7 @@ function showCreateInstanceModal() {
       return;
     }
     if (carrier === 'openflux' && (!room || (!room.startsWith('http://') && !room.startsWith('https://')))) {
-      showToast('Для OpenFlux укажите полную ссылку на документ Yandex Docs (https://...)', 'error');
+      showToast('Для OpenFlux укажите полную ссылку на документ (https://...)', 'error');
       return;
     }
     const body = {
@@ -2398,6 +2470,9 @@ function showCreateInstanceModal() {
       traffic_min_delay: trafficMinDelayField.input.value.trim(),
       traffic_max_delay: trafficMaxDelayField.input.value.trim(),
     };
+    if (carrier === 'openflux' && openfluxKeyInput.value.trim()) {
+      body.openflux_key = openfluxKeyInput.value.trim();
+    }
     await withLoading(createBtn, async () => {
       try {
         await api('/instances', { method: 'POST', body: JSON.stringify(body) });
@@ -2497,6 +2572,56 @@ function showConfigModal(inst) {
   rotateRow.appendChild(keyRotateBtn);
   rotateRow.appendChild(roomRotateBtn);
   connectionSec.appendChild(rotateRow);
+
+  const openfluxKeySec = el('div', 'p-3 mt-3 rounded-lg border border-gray-700 bg-gray-800/30 hidden');
+  openfluxKeySec.innerHTML = '<div class="text-xs text-gray-400 mb-2 flex items-center gap-1.5">' + icon('lock', 12) + '<span>Шифрование OpenFlux (AES-256-GCM)</span></div>';
+  const openfluxKeyRow = el('div', 'flex gap-2 items-center');
+  const openfluxKeyInput = el('input', 'input flex-1 font-mono text-xs');
+  openfluxKeyInput.type = 'password';
+  openfluxKeyInput.value = inst.openflux_key || '';
+  openfluxKeyInput.placeholder = inst.has_openflux_key ? 'Ключ задан (введите новый или очистите)' : 'Ключ шифрования (опционально, от 16 символов)';
+  let openfluxKeyCleared = false;
+  const toggleKeyVisBtn = el('button', 'btn btn-secondary btn-sm p-2 shrink-0');
+  toggleKeyVisBtn.type = 'button';
+  toggleKeyVisBtn.title = 'Показать / скрыть ключ';
+  toggleKeyVisBtn.innerHTML = icon('eye', 14);
+  toggleKeyVisBtn.onclick = () => {
+    if (openfluxKeyInput.type === 'password') {
+      openfluxKeyInput.type = 'text';
+      toggleKeyVisBtn.innerHTML = icon('eye-off', 14);
+    } else {
+      openfluxKeyInput.type = 'password';
+      toggleKeyVisBtn.innerHTML = icon('eye', 14);
+    }
+  };
+  const genKeyBtn = el('button', 'btn btn-secondary btn-sm flex items-center gap-1 shrink-0');
+  genKeyBtn.type = 'button';
+  genKeyBtn.title = 'Сгенерировать случайный 256-битный ключ';
+  genKeyBtn.innerHTML = icon('refresh-cw', 12) + '<span>Сгенерировать</span>';
+  genKeyBtn.onclick = () => {
+    openfluxKeyInput.value = randHex(32);
+    openfluxKeyInput.type = 'text';
+    toggleKeyVisBtn.innerHTML = icon('eye-off', 14);
+    openfluxKeyCleared = false;
+  };
+  const clearKeyBtn = el('button', 'btn btn-secondary btn-sm p-2 shrink-0');
+  clearKeyBtn.type = 'button';
+  clearKeyBtn.title = 'Очистить ключ шифрования';
+  clearKeyBtn.innerHTML = icon('trash-2', 14);
+  clearKeyBtn.onclick = () => {
+    openfluxKeyInput.value = '';
+    openfluxKeyCleared = true;
+    showToast('Ключ шифрования очищен. Нажмите «Сохранить» для применения.');
+  };
+  openfluxKeyRow.appendChild(openfluxKeyInput);
+  openfluxKeyRow.appendChild(toggleKeyVisBtn);
+  openfluxKeyRow.appendChild(genKeyBtn);
+  openfluxKeyRow.appendChild(clearKeyBtn);
+  openfluxKeySec.appendChild(openfluxKeyRow);
+  const openfluxKeyHint = el('div', 'mt-1.5 text-xs text-gray-500');
+  openfluxKeyHint.textContent = 'При наличии ключа exit-node и мобильный клиент шифруют трафик (AES-256-GCM). Ключ добавляется в QR-код и ссылку (&k=...).';
+  openfluxKeySec.appendChild(openfluxKeyHint);
+  connectionSec.appendChild(openfluxKeySec);
   div.appendChild(connectionSec);
 
   // ── Network section ──
@@ -2667,12 +2792,14 @@ function showConfigModal(inst) {
     jitsiBlock.classList.toggle('hidden', !(c === 'jitsi' && t === 'datachannel'));
     wbHint.classList.toggle('hidden', c !== 'wbstream');
     jitsiPresets.classList.toggle('hidden', c !== 'jitsi');
+    openfluxKeySec.classList.toggle('hidden', c !== 'openflux');
+    keyRotateBtn.style.display = (c === 'openflux') ? 'none' : '';
     roomRotateBtn.disabled = (c === 'wbstream' || c === 'openflux');
     roomRotateBtn.title = (c === 'wbstream') ? 'WB Stream отключил автосоздание румы' : (c === 'openflux') ? 'Для OpenFlux используется постоянная ссылка на документ' : '';
     if (c === 'openflux') {
       const lbl = roomIDField.field.querySelector('label');
-      if (lbl && lbl.lastChild) lbl.lastChild.textContent = ' Ссылка на документ (Yandex Docs)';
-      roomIDField.input.placeholder = 'https://disk.yandex.ru/i/... или https://docs.yandex.ru/...';
+      if (lbl && lbl.lastChild) lbl.lastChild.textContent = ' Ссылка на документ (Yandex / Mail.ru Docs)';
+      roomIDField.input.placeholder = 'https://disk.yandex.ru/i/... или https://docs.mail.ru/...';
     } else {
       const lbl = roomIDField.field.querySelector('label');
       if (lbl && lbl.lastChild) lbl.lastChild.textContent = ' Room ID';
@@ -2705,7 +2832,7 @@ function showConfigModal(inst) {
       return;
     }
     if (carrier === 'openflux' && (!room || (!room.startsWith('http://') && !room.startsWith('https://')))) {
-      showToast('Для OpenFlux укажите полную ссылку на документ Yandex Docs (https://...)', 'error');
+      showToast('Для OpenFlux укажите полную ссылку на документ (https://...)', 'error');
       return;
     }
     const body = {
@@ -2723,6 +2850,14 @@ function showConfigModal(inst) {
       traffic_min_delay: trafficMinDelayField.input.value.trim(),
       traffic_max_delay: trafficMaxDelayField.input.value.trim(),
     };
+    if (carrier === 'openflux') {
+      const k = openfluxKeyInput.value.trim();
+      if (k) {
+        body.openflux_key = k;
+      } else if (openfluxKeyCleared || inst.has_openflux_key) {
+        body.clear_openflux_key = true;
+      }
+    }
     const authToken = authTokenField.input.value.trim();
     if (authToken) {
       body.auth_token = authToken;

@@ -36,6 +36,8 @@ type Instance struct {
 	HasAuthToken            bool   `json:"has_auth_token"`
 	AuthTokenExpiresAt      int64  `json:"auth_token_expires_at,omitempty"`
 	AuthTokenExpired        bool   `json:"auth_token_expired"`
+	HasOpenFluxKey          bool   `json:"has_openflux_key"`
+	OpenFluxKey             string `json:"openflux_key,omitempty"`
 	Name                    string `json:"name"`
 	Status                  string `json:"status"`
 	Uptime                  string `json:"uptime"`
@@ -217,6 +219,7 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 	trafficMinDelay := ""
 	trafficMaxDelay := ""
 	authToken := ""
+	openfluxKey := ""
 	if r.Body != nil {
 		var req struct {
 			Carrier                 string `json:"carrier"`
@@ -224,6 +227,7 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 			Name                    string `json:"name"`
 			RoomID                  string `json:"room_id"`
 			AuthToken               string `json:"auth_token"`
+			OpenFluxKey             string `json:"openflux_key"`
 			VP8FPS                  any    `json:"vp8_fps"`
 			VP8Batch                any    `json:"vp8_batch"`
 			DNS                     string `json:"dns"`
@@ -247,6 +251,7 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 			}
 			roomID = req.RoomID
 			authToken = strings.TrimSpace(req.AuthToken)
+			openfluxKey = strings.TrimSpace(req.OpenFluxKey)
 			if req.VP8FPS != nil {
 				vp8FPS = sanitizeUnsignedAny(req.VP8FPS)
 			}
@@ -305,6 +310,9 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 	vals["OLCRTC_CLIENT_ID"] = uuid.NewString()
 	if authToken != "" {
 		vals["OLCRTC_AUTH_TOKEN"] = authToken
+	}
+	if carrier == "openflux" && openfluxKey != "" {
+		vals["OLCRTC_OPENFLUX_KEY"] = openfluxKey
 	}
 	vals["OLCRTC_JITSI_BRIDGE_MODE"] = jitsiBridgeMode
 	if jitsiSCTPMaxMessageSize != "" {
@@ -461,6 +469,12 @@ func buildInstanceConfigUpdates(req map[string]any) map[string]string {
 	}
 	if v, ok := req["clear_auth_token"].(bool); ok && v {
 		updates["OLCRTC_AUTH_TOKEN"] = ""
+	}
+	if v, ok := req["openflux_key"].(string); ok {
+		updates["OLCRTC_OPENFLUX_KEY"] = strings.TrimSpace(v)
+	}
+	if v, ok := req["clear_openflux_key"].(bool); ok && v {
+		updates["OLCRTC_OPENFLUX_KEY"] = ""
 	}
 	if v, ok := req["dns"].(string); ok {
 		updates["OLCRTC_DNS"] = v
@@ -714,6 +728,7 @@ func (s *Server) buildInstance(id int) Instance {
 	clientID := s.ensureClientID(envPath, vals["OLCRTC_CLIENT_ID"])
 	authToken := strings.TrimSpace(vals["OLCRTC_AUTH_TOKEN"])
 	authExpiresAt, _ := parseJWTExpiry(authToken)
+	openfluxKey := strings.TrimSpace(vals["OLCRTC_OPENFLUX_KEY"])
 
 	label := "Доп. #" + strconv.Itoa(id)
 	if id == 0 {
@@ -739,6 +754,8 @@ func (s *Server) buildInstance(id int) Instance {
 		HasAuthToken:            authToken != "",
 		AuthTokenExpiresAt:      authExpiresAt,
 		AuthTokenExpired:        authExpiresAt > 0 && time.Now().Unix() >= authExpiresAt,
+		HasOpenFluxKey:          openfluxKey != "",
+		OpenFluxKey:             openfluxKey,
 		Name:                    name,
 		Status:                  status,
 		Uptime:                  uptime,
@@ -801,6 +818,9 @@ func (s *Server) buildCompactURIWith(vals map[string]string, clientID string) st
 		if dns := strings.TrimSpace(vals["OLCRTC_DNS"]); dns != "" && dns != "77.88.8.8:53" {
 			uri += "&d=" + url.QueryEscape(dns)
 		}
+		if encKey := strings.TrimSpace(vals["OLCRTC_OPENFLUX_KEY"]); encKey != "" {
+			uri += "&k=" + url.QueryEscape(encKey)
+		}
 		uri += "#" + url.QueryEscape(name)
 		return uri
 	}
@@ -857,6 +877,9 @@ func (s *Server) buildURIWith(vals map[string]string, clientID string) string {
 		}
 		if dns := strings.TrimSpace(vals["OLCRTC_DNS"]); dns != "" && dns != "77.88.8.8:53" {
 			uri += "&d=" + url.QueryEscape(dns)
+		}
+		if encKey := strings.TrimSpace(vals["OLCRTC_OPENFLUX_KEY"]); encKey != "" {
+			uri += "&k=" + url.QueryEscape(encKey)
 		}
 		uri += "#" + url.QueryEscape(name)
 		return uri
