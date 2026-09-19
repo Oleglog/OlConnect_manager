@@ -104,7 +104,8 @@ const ICONS = {
   'copy': '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   'qr-code': '<rect x="2" y="2" width="8" height="8"/><rect x="14" y="2" width="8" height="8"/><rect x="2" y="14" width="8" height="8"/><path d="M14 14h.01"/><path d="M18 14h.01"/><path d="M14 18h.01"/><path d="M18 18h.01"/><path d="M22 14v4a2 2 0 0 1-2 2h-2"/><path d="M10 22H6a2 2 0 0 1-2-2v-2"/>',
   'refresh-cw': '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/>',
-  'square': '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>',
+  'square': '<rect x="5" y="5" width="14" height="14" rx="2" ry="2" fill="currentColor"/>',
+  'stop': '<rect x="5" y="5" width="14" height="14" rx="2" ry="2" fill="currentColor"/>',
   'play': '<polygon points="5 3 19 12 5 21 5 3"/>',
   'sliders': '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>',
   'trash-2': '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
@@ -899,14 +900,14 @@ function renderInstanceCard(inst, context = {}) {
     });
   };
   const cfgBtn = el('button', 'btn btn-secondary btn-sm');
-  cfgBtn.setAttribute('aria-label', 'Настройки');
-  cfgBtn.innerHTML = icon('settings') + '<span>Настройки</span>';
-  cfgBtn.onclick = () => showEditInstanceModal(inst);
-  const startStopBtn = el('button', 'btn btn-secondary btn-sm btn-icon');
+  cfgBtn.setAttribute('aria-label', 'Настройки инстанса');
+  cfgBtn.innerHTML = icon('sliders') + '<span>Настройки</span>';
+  cfgBtn.onclick = () => showConfigModal(inst);
   const isRunning = inst.status === 'running';
+  const startStopBtn = el('button', isRunning ? 'btn btn-secondary btn-sm btn-icon' : 'btn btn-success btn-sm btn-icon');
   startStopBtn.setAttribute('aria-label', isRunning ? 'Остановить' : 'Запустить');
   startStopBtn.title = isRunning ? 'Остановить' : 'Запустить';
-  startStopBtn.innerHTML = icon(isRunning ? 'stop' : 'play');
+  startStopBtn.innerHTML = isRunning ? icon('stop') : icon('play');
   startStopBtn.onclick = async () => {
     const action = isRunning ? 'stop' : 'start';
     if (action === 'stop' && !(await confirmBusyInstance(inst, 'Остановить'))) return;
