@@ -391,7 +391,7 @@ fi
 write_state "downloading_openflux" "Скачивание openflux..." 30
 echo "Downloading openflux binary..."
 curl -fsSL --retry 2 --retry-delay 3 --max-time 300 "https://github.com/Oleglog/OpenFlux-Android/releases/latest/download/openflux-linux-%s" -o "$TMPDIR/openflux" || true
-curl -fsSL --retry 2 --retry-delay 3 --max-time 60 "https://github.com/Oleglog/OpenFlux-Android/releases/latest/download/checksums.txt" -o "$TMPDIR/openflux-checksums.txt" 2>/dev/null || true
+curl -fsSL --retry 2 --retry-delay 3 --max-time 60 "https://github.com/Oleglog/OpenFlux-Android/releases/latest/download/SHA256SUMS" -o "$TMPDIR/openflux-checksums.txt" 2>/dev/null || curl -fsSL --retry 2 --retry-delay 3 --max-time 60 "https://github.com/Oleglog/OpenFlux-Android/releases/latest/download/checksums.txt" -o "$TMPDIR/openflux-checksums.txt" 2>/dev/null || true
 
 write_state "verifying" "Проверка бинарников..." 35
 # Verify binaries are valid ELF files

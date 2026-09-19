@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO="Oleglog/OlConnect_manager"
 # Fallback release used only when the latest tag cannot be resolved from GitHub.
-INSTALLER_VERSION="2.1.7"
+INSTALLER_VERSION="2.1.8"
 RELEASE_TAG=""
 RELEASE_VERSION=""
 CARRIER_DEFAULT="jitsi"
@@ -453,10 +453,46 @@ else
 # olcRTC server launcher (refactor-universal-carrier branch).
 set -euo pipefail
 
-CONFIG_FILE="./config.yaml"
-
 carrier="${OLCRTC_CARRIER:-${OLCRTC_PROVIDER:-}}"
 [ "$carrier" = "wb_stream" ] && carrier="wbstream"
+
+if [ "$carrier" = "openflux" ]; then
+    echo "Starting openflux exit node for document: ${OLCRTC_ROOM_ID}"
+    IPTABLES_BIN=$(command -v iptables || echo "/usr/sbin/iptables")
+    local_ip_flag=""
+    if [ -n "${OLCRTC_LOCAL_IP:-}" ]; then
+        local_ip_flag="--local-ip ${OLCRTC_LOCAL_IP}"
+        if [ -x "$IPTABLES_BIN" ] || command -v iptables >/dev/null 2>&1; then
+            iptables -C OUTPUT -s "${OLCRTC_LOCAL_IP}" -p tcp --tcp-flags RST RST -j DROP 2>/dev/null || \
+            iptables -I OUTPUT 1 -s "${OLCRTC_LOCAL_IP}" -p tcp --tcp-flags RST RST -j DROP 2>/dev/null || true
+        fi
+    else
+        if [ -x "$IPTABLES_BIN" ] || command -v iptables >/dev/null 2>&1; then
+            iptables -C OUTPUT -p tcp --tcp-flags RST RST -j DROP 2>/dev/null || \
+            iptables -I OUTPUT 1 -p tcp --tcp-flags RST RST -j DROP 2>/dev/null || true
+        fi
+    fi
+    OPENFLUX_BIN="/usr/local/bin/openflux"
+    if [ ! -x "$OPENFLUX_BIN" ]; then
+        if [ -x "/usr/bin/openflux" ]; then
+            OPENFLUX_BIN="/usr/bin/openflux"
+        elif [ -x "./openflux" ]; then
+            OPENFLUX_BIN="./openflux"
+        fi
+    fi
+    t="${OLCRTC_TRANSPORT:-yandex}"
+    [ "$t" = "auto" ] && t="yandex"
+    debug_flag=""
+    if [ -n "${OLCRTC_DEBUG:-}" ] && [ "$OLCRTC_DEBUG" != "0" ] && [ "$OLCRTC_DEBUG" != "false" ]; then
+        debug_flag="--debug"
+    fi
+    codec_flag="--codec ${OLCRTC_CODEC:-legacy}"
+    key_flag=""
+    if [ -n "${OLCRTC_OPENFLUX_KEY:-${OPENFLUX_KEY:-}}" ]; then
+        key_flag="--encryption-key ${OLCRTC_OPENFLUX_KEY:-${OPENFLUX_KEY}}"
+    fi
+    exec "$OPENFLUX_BIN" --exit-node --url "${OLCRTC_ROOM_ID}" --transport "$t" $local_ip_flag $codec_flag $key_flag $debug_flag
+fi
 
 if [ -z "$carrier" ] || [ -z "${OLCRTC_ROOM_ID:-}" ] || [ -z "${OLCRTC_KEY:-}" ]; then
     echo "olcrtc-launcher: missing required env" >&2; exit 64

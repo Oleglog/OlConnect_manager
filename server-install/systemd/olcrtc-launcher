@@ -84,13 +84,10 @@ if [ "$carrier" = "openflux" ]; then
     if [ -n "${OLCRTC_DEBUG:-}" ] && [ "$OLCRTC_DEBUG" != "0" ] && [ "$OLCRTC_DEBUG" != "false" ]; then
         debug_flag="--debug"
     fi
-    codec_flag=""
-    if [ -n "${OLCRTC_CODEC:-}" ]; then
-        codec_flag="--codec ${OLCRTC_CODEC}"
-    fi
+    codec_flag="--codec ${OLCRTC_CODEC:-legacy}"
     key_flag=""
-    if [ -n "${OLCRTC_KEY:-}" ]; then
-        key_flag="--encryption-key ${OLCRTC_KEY}"
+    if [ -n "${OLCRTC_OPENFLUX_KEY:-${OPENFLUX_KEY:-}}" ]; then
+        key_flag="--encryption-key ${OLCRTC_OPENFLUX_KEY:-${OPENFLUX_KEY}}"
     fi
     exec "$OPENFLUX_BIN" --exit-node --url "${OLCRTC_ROOM_ID}" --transport "$t" $local_ip_flag $codec_flag $key_flag $debug_flag
 fi
