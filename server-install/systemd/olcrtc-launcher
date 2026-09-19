@@ -57,9 +57,18 @@ carrier="${OLCRTC_CARRIER:-${OLCRTC_PROVIDER:-}}"
 if [ "$carrier" = "openflux" ]; then
     echo "Starting openflux exit node for document: ${OLCRTC_ROOM_ID}"
     IPTABLES_BIN=$(command -v iptables || echo "/usr/sbin/iptables")
-    if [ -x "$IPTABLES_BIN" ] || command -v iptables >/dev/null 2>&1; then
-        iptables -C OUTPUT -p tcp --tcp-flags RST RST -j DROP 2>/dev/null || \
-        iptables -I OUTPUT 1 -p tcp --tcp-flags RST RST -j DROP 2>/dev/null || true
+    local_ip_flag=""
+    if [ -n "${OLCRTC_LOCAL_IP:-}" ]; then
+        local_ip_flag="--local-ip ${OLCRTC_LOCAL_IP}"
+        if [ -x "$IPTABLES_BIN" ] || command -v iptables >/dev/null 2>&1; then
+            iptables -C OUTPUT -s "${OLCRTC_LOCAL_IP}" -p tcp --tcp-flags RST RST -j DROP 2>/dev/null || \
+            iptables -I OUTPUT 1 -s "${OLCRTC_LOCAL_IP}" -p tcp --tcp-flags RST RST -j DROP 2>/dev/null || true
+        fi
+    else
+        if [ -x "$IPTABLES_BIN" ] || command -v iptables >/dev/null 2>&1; then
+            iptables -C OUTPUT -p tcp --tcp-flags RST RST -j DROP 2>/dev/null || \
+            iptables -I OUTPUT 1 -p tcp --tcp-flags RST RST -j DROP 2>/dev/null || true
+        fi
     fi
     OPENFLUX_BIN="/usr/local/bin/openflux"
     if [ ! -x "$OPENFLUX_BIN" ]; then
@@ -75,7 +84,15 @@ if [ "$carrier" = "openflux" ]; then
     if [ -n "${OLCRTC_DEBUG:-}" ] && [ "$OLCRTC_DEBUG" != "0" ] && [ "$OLCRTC_DEBUG" != "false" ]; then
         debug_flag="--debug"
     fi
-    exec "$OPENFLUX_BIN" --exit-node --url "${OLCRTC_ROOM_ID}" --transport "$t" $debug_flag
+    codec_flag=""
+    if [ -n "${OLCRTC_CODEC:-}" ]; then
+        codec_flag="--codec ${OLCRTC_CODEC}"
+    fi
+    key_flag=""
+    if [ -n "${OLCRTC_KEY:-}" ]; then
+        key_flag="--encryption-key ${OLCRTC_KEY}"
+    fi
+    exec "$OPENFLUX_BIN" --exit-node --url "${OLCRTC_ROOM_ID}" --transport "$t" $local_ip_flag $codec_flag $key_flag $debug_flag
 fi
 
 if [ -z "$carrier" ] || [ -z "${OLCRTC_ROOM_ID:-}" ] || [ -z "${OLCRTC_KEY:-}" ]; then

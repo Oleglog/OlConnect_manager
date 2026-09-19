@@ -77,7 +77,7 @@ function toggleTheme() {
 function compatibleTransports(carrier) {
   if (carrier === 'telemost' || carrier === 'wbstream') return ['vp8channel'];
   if (carrier === 'jitsi') return ['datachannel'];
-  if (carrier === 'openflux') return ['auto', 'vyandex', 'yandex'];
+  if (carrier === 'openflux') return ['auto', 'vyandex', 'yandex', 'mailru'];
   return ['vp8channel', 'datachannel'];
 }
 
@@ -773,7 +773,6 @@ function renderInstanceCard(inst, context = {}) {
   const card = el('div', 'card card-hover instance-card p-4 flex flex-col gap-3');
   const displayName = context.displayName || inst.name || inst.label;
   const displayURI = withInstanceName(inst.uri, displayName);
-  const displaySpecURI = inst.spec_uri ? withInstanceName(inst.spec_uri, displayName) : '';
 
   // Header: status + label
   const head = el('div', 'flex items-center justify-between gap-2');
@@ -862,24 +861,6 @@ function renderInstanceCard(inst, context = {}) {
     navigator.clipboard.writeText(displayURI);
     showToast('URI скопирован');
   };
-  const specUriBtn = el('button', 'btn btn-secondary btn-sm');
-  specUriBtn.setAttribute('aria-label', 'Копировать URI (spec)');
-  specUriBtn.innerHTML = icon('copy') + '<span>Spec URI</span>';
-  specUriBtn.title = 'Формат по спецификации uri.md (для сторонних клиентов)';
-  specUriBtn.onclick = async () => {
-    if (displaySpecURI) {
-      navigator.clipboard.writeText(displaySpecURI);
-      showToast('Spec URI скопирован');
-    } else {
-      try {
-        const res = await api('/instances/' + inst.id + '/spec-uri');
-        navigator.clipboard.writeText(withInstanceName(res.uri, displayName));
-        showToast('Spec URI скопирован');
-      } catch (e) {
-        showToast('Ошибка: ' + e.message, 'error');
-      }
-    }
-  };
   const qrBtn = el('button', 'btn btn-secondary btn-sm');
   qrBtn.setAttribute('aria-label', 'Показать QR-код');
   qrBtn.innerHTML = icon('qr-code') + '<span>QR</span>';
@@ -918,16 +899,16 @@ function renderInstanceCard(inst, context = {}) {
     });
   };
   const cfgBtn = el('button', 'btn btn-secondary btn-sm');
-  cfgBtn.setAttribute('aria-label', 'Настройки инстанса');
-  cfgBtn.innerHTML = icon('sliders') + '<span>Настройки</span>';
-  cfgBtn.onclick = () => showConfigModal(inst);
-
-  const startStopBtn = el('button', inst.status === 'running' ? 'btn btn-secondary btn-sm btn-icon' : 'btn btn-success btn-sm btn-icon');
-  startStopBtn.setAttribute('aria-label', inst.status === 'running' ? 'Остановить' : 'Запустить');
-  startStopBtn.title = inst.status === 'running' ? 'Остановить' : 'Запустить';
-  startStopBtn.innerHTML = inst.status === 'running' ? icon('square') : icon('play');
+  cfgBtn.setAttribute('aria-label', 'Настройки');
+  cfgBtn.innerHTML = icon('settings') + '<span>Настройки</span>';
+  cfgBtn.onclick = () => showEditInstanceModal(inst);
+  const startStopBtn = el('button', 'btn btn-secondary btn-sm btn-icon');
+  const isRunning = inst.status === 'running';
+  startStopBtn.setAttribute('aria-label', isRunning ? 'Остановить' : 'Запустить');
+  startStopBtn.title = isRunning ? 'Остановить' : 'Запустить';
+  startStopBtn.innerHTML = icon(isRunning ? 'stop' : 'play');
   startStopBtn.onclick = async () => {
-    const action = inst.status === 'running' ? 'stop' : 'start';
+    const action = isRunning ? 'stop' : 'start';
     if (action === 'stop' && !(await confirmBusyInstance(inst, 'Остановить'))) return;
     await withLoading(startStopBtn, async () => {
       try {
@@ -952,7 +933,6 @@ function renderInstanceCard(inst, context = {}) {
     });
   };
   actions.appendChild(uriBtn);
-  actions.appendChild(specUriBtn);
   actions.appendChild(qrBtn);
   actions.appendChild(pingBtn);
   actions.appendChild(cfgBtn);
@@ -2113,6 +2093,7 @@ function showQRModal(uri, inst) {
       ' Смените транспорт на <b>vp8channel</b> в настройках инстанса.';
     div.appendChild(dcWarn);
   }
+
   const qrWrap = el('div', 'qr-wrap flex justify-center mb-3 mx-auto overflow-auto');
   const qrDiv = el('div', '');
   qrWrap.appendChild(qrDiv);
@@ -2170,7 +2151,7 @@ function showQRModal(uri, inst) {
     };
 
     if (frames.length > 1) {
-      const multipart = el('div', 'flex items-center justify-center gap-2 mb-2');
+      const nav = el('div', 'flex items-center justify-center gap-2 mb-2');
       const prev = el('button', 'btn btn-secondary btn-sm');
       prev.textContent = 'Назад';
       frameLabel = el('span', 'text-sm text-gray-300');
@@ -2178,10 +2159,10 @@ function showQRModal(uri, inst) {
       next.textContent = 'Далее';
       prev.onclick = () => { frameIndex = (frameIndex + frames.length - 1) % frames.length; renderFrame(); };
       next.onclick = () => { frameIndex = (frameIndex + 1) % frames.length; renderFrame(); };
-      multipart.appendChild(prev);
-      multipart.appendChild(frameLabel);
-      multipart.appendChild(next);
-      div.insertBefore(multipart, qrWrap.nextSibling);
+      nav.appendChild(prev);
+      nav.appendChild(frameLabel);
+      nav.appendChild(next);
+      div.insertBefore(nav, qrWrap.nextSibling);
     }
 
     renderFrame();

@@ -24,6 +24,10 @@ ExecStart=/usr/local/bin/olcrtc-launcher
 # Hardening
 ProtectHome=true
 PrivateTmp=true
+ProtectSystem=full
+ProtectControlGroups=true
+ProtectKernelModules=true
+ReadWritePaths=/var/lib/olcrtc /run/olcrtc /etc/olcrtc
 
 # Restart policy
 Restart=on-failure

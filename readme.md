@@ -14,7 +14,7 @@
 
 | Provider | Транспорты | Описание и статус |
 |---|---|---|
-| `openflux` | `auto`, `vyandex`, `yandex` | **Рекомендуемый.** Шифрованный L3 IP-туннель через Yandex Docs (Volga и классический редактор). Не требует регистрации комнат. |
+| `openflux` | `auto`, `vyandex`, `yandex` | **Рекомендуемый.** L3 IP-туннель через Yandex Docs (Volga и классический редактор). Не требует регистрации комнат. Трафик защищён HTTPS Яндекса. |
 | `telemost` | `vp8channel`, `videochannel` | WebRTC-сессии через Яндекс.Телемост с автоматической генерацией Room ID. |
 | `jitsi` | `vp8channel`, `datachannel`, `seichannel`, `videochannel` | Быстрый старт через публичные серверы Jitsi Meet (meet.jit.si и др.). |
 | `wbstream` | `vp8channel`, `datachannel` | WebRTC через WB Stream с поддержкой автоматизации авторизации в браузере. |
