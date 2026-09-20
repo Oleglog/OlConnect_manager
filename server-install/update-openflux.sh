@@ -64,6 +64,8 @@ sed -i 's/Group=olcrtc/Group=root/' /etc/systemd/system/olcrtc-server.service /e
 sed -i '/ProtectSystem=strict/d' /etc/systemd/system/olcrtc-server.service /etc/systemd/system/olcrtc-server@.service 2>/dev/null || true
 sed -i '/NoNewPrivileges=true/d' /etc/systemd/system/olcrtc-server.service /etc/systemd/system/olcrtc-server@.service 2>/dev/null || true
 sed -i '/RestrictAddressFamilies/d' /etc/systemd/system/olcrtc-server.service /etc/systemd/system/olcrtc-server@.service 2>/dev/null || true
+echo "[*] Ensuring IP forwarding and system capabilities..."
+sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
 grep -q AmbientCapabilities /etc/systemd/system/olcrtc-server.service 2>/dev/null || sed -i '/\[Service\]/a AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW\nCapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW' /etc/systemd/system/olcrtc-server.service 2>/dev/null || true
 grep -q AmbientCapabilities /etc/systemd/system/olcrtc-server@.service 2>/dev/null || sed -i '/\[Service\]/a AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW\nCapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW' /etc/systemd/system/olcrtc-server@.service 2>/dev/null || true
 systemctl daemon-reload 2>/dev/null || true
@@ -73,9 +75,11 @@ rm -f /tmp/.openflux_update_check
 
 echo "[*] Restarting services..."
 systemctl restart olcrtc-server.service 2>/dev/null || true
-for svc in $(systemctl list-units --type=service --state=running "olcrtc-server@*" --no-legend 2>/dev/null | awk '{print $1}'); do
-    echo "    Restarting $svc..."
-    systemctl restart "$svc" 2>/dev/null || true
+for svc in $(systemctl list-units --type=service --all "olcrtc-server@*" --no-legend 2>/dev/null | awk '{print $1}'); do
+    if [ -n "$svc" ]; then
+        echo "    Restarting $svc..."
+        systemctl restart "$svc" 2>/dev/null || true
+    fi
 done
 
 echo ""
