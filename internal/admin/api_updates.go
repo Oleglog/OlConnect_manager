@@ -415,7 +415,8 @@ if [ -f "$TMPDIR/openflux" ]; then
         rm -f "$TMPDIR/openflux"
     elif [ -f "$TMPDIR/openflux-checksums.txt" ] && command -v sha256sum >/dev/null 2>&1; then
         echo "Verifying openflux SHA-256..."
-        if ! (cd "$TMPDIR" && grep -E "openflux-linux" openflux-checksums.txt | awk '{print $1"  openflux"}' | sha256sum -c - 2>/dev/null); then
+        OPENFLUX_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+        if ! (cd "$TMPDIR" && grep -E "openflux-linux-${OPENFLUX_ARCH}" openflux-checksums.txt | awk '{print $1"  openflux"}' | sha256sum -c - 2>/dev/null); then
             echo "WARNING: openflux checksum mismatch, skipping install"
             rm -f "$TMPDIR/openflux"
         fi

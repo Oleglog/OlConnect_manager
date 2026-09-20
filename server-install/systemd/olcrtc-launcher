@@ -79,7 +79,17 @@ if [ "$carrier" = "openflux" ]; then
         fi
     fi
     t="${OLCRTC_TRANSPORT:-yandex}"
-    [ "$t" = "auto" ] && t="yandex"
+    if [ "$t" = "auto" ] || [ -z "$t" ]; then
+        if [[ "${OLCRTC_ROOM_ID}" == *"mail.ru"* ]]; then
+            t="mailru"
+        else
+            t="yandex"
+        fi
+    fi
+    mode_flag=""
+    if [ -n "${OLCRTC_OPENFLUX_MODE:-}" ]; then
+        mode_flag="--mode ${OLCRTC_OPENFLUX_MODE}"
+    fi
     debug_flag=""
     if [ -n "${OLCRTC_DEBUG:-}" ] && [ "$OLCRTC_DEBUG" != "0" ] && [ "$OLCRTC_DEBUG" != "false" ]; then
         debug_flag="--debug"
@@ -89,7 +99,7 @@ if [ "$carrier" = "openflux" ]; then
     if [ -n "${OLCRTC_OPENFLUX_KEY:-${OPENFLUX_KEY:-}}" ]; then
         key_flag="--encryption-key ${OLCRTC_OPENFLUX_KEY:-${OPENFLUX_KEY}}"
     fi
-    exec "$OPENFLUX_BIN" --exit-node --url "${OLCRTC_ROOM_ID}" --transport "$t" $local_ip_flag $codec_flag $key_flag $debug_flag
+    exec "$OPENFLUX_BIN" --exit-node --url "${OLCRTC_ROOM_ID}" --transport "$t" $mode_flag $local_ip_flag $codec_flag $key_flag $debug_flag
 fi
 
 if [ -z "$carrier" ] || [ -z "${OLCRTC_ROOM_ID:-}" ] || [ -z "${OLCRTC_KEY:-}" ]; then
