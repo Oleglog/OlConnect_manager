@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO="Oleglog/OlConnect_manager"
 # Fallback release used only when the latest tag cannot be resolved from GitHub.
-INSTALLER_VERSION="2.3.0"
+INSTALLER_VERSION="2.3.1"
 RELEASE_TAG=""
 RELEASE_VERSION=""
 CARRIER_DEFAULT="jitsi"
@@ -594,7 +594,7 @@ if [ "$carrier" = "openflux" ]; then
             t="yandex"
         fi
     fi
-    mode_flag="--mode ${OLCRTC_OPENFLUX_MODE:-l3}"
+    mode_flag="--mode ${OLCRTC_OPENFLUX_MODE:-l4}"
     debug_flag=""
     if [ -n "${OLCRTC_DEBUG:-}" ] && [ "$OLCRTC_DEBUG" != "0" ] && [ "$OLCRTC_DEBUG" != "false" ]; then
         debug_flag="--debug"
