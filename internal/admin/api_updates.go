@@ -416,9 +416,15 @@ if [ -f "$TMPDIR/openflux" ]; then
     elif [ -f "$TMPDIR/openflux-checksums.txt" ] && command -v sha256sum >/dev/null 2>&1; then
         echo "Verifying openflux SHA-256..."
         OPENFLUX_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-        if ! (cd "$TMPDIR" && grep -E "openflux-linux-${OPENFLUX_ARCH}" openflux-checksums.txt | awk '{print $1"  openflux"}' | sha256sum -c - 2>/dev/null); then
-            echo "WARNING: openflux checksum mismatch, skipping install"
-            rm -f "$TMPDIR/openflux"
+        EXPECTED_HASH=$(grep -E "[[:space:]]openflux-linux-${OPENFLUX_ARCH}$" "$TMPDIR/openflux-checksums.txt" 2>/dev/null | awk '{print $1}')
+        if [ -n "$EXPECTED_HASH" ]; then
+            ACTUAL_HASH=$(sha256sum "$TMPDIR/openflux" | awk '{print $1}')
+            if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
+                echo "WARNING: openflux checksum mismatch (expected $EXPECTED_HASH, got $ACTUAL_HASH), skipping install"
+                rm -f "$TMPDIR/openflux"
+            else
+                echo "openflux SHA-256 verified successfully"
+            fi
         fi
     fi
 fi
@@ -440,6 +446,11 @@ install -m 0755 "$TMPDIR/olcrtc-admin" /usr/local/bin/olcrtc-admin
 if [ -f "$TMPDIR/openflux" ]; then
     chmod +x "$TMPDIR/openflux"
     install -m 0755 "$TMPDIR/openflux" /usr/local/bin/openflux
+    mkdir -p /etc/olcrtc
+    OPENFLUX_VER=$(curl -fsSLI -H "User-Agent: olcrtc-admin" -o /dev/null -w "%%{url_effective}" --max-time 5 https://github.com/Oleglog/OpenFlux-Android/releases/latest 2>/dev/null | sed -n 's#.*/tag/##p' || true)
+    if [ -n "$OPENFLUX_VER" ]; then
+        echo "$OPENFLUX_VER" > /etc/olcrtc/openflux.version 2>/dev/null || true
+    fi
 fi
 curl -fsSL https://raw.githubusercontent.com/Oleglog/OlConnect_manager/master/server-install/systemd/olcrtc-launcher -o /usr/local/bin/olcrtc-launcher && chmod +x /usr/local/bin/olcrtc-launcher || true
 sed -i 's/User=olcrtc/User=root/' /etc/systemd/system/olcrtc-server.service /etc/systemd/system/olcrtc-server@.service 2>/dev/null || true

@@ -51,6 +51,11 @@ curl -fsSL https://raw.githubusercontent.com/Oleglog/OlConnect_manager/master/se
 - **Поддержка OpenFlux Exit-Node**:
   - Транспорты: Yandex Docs (классический и Volga) и Mail.ru Docs.
   - **Сквозное шифрование AES-256-GCM**: настраивается прямо в панели (поле «Ключ шифрования» с генератором в один клик и возможностью очистки). Ключ автоматически экспортируется в URI (`&k=...`) и в QR-код инстанса.
+  - **Автообновление бинарников**: `olcrtc-launcher` и установщик автоматически подтягивают и обновляют бинарники `openflux` из релизов [OpenFlux-Android](https://github.com/Oleglog/OpenFlux-Android) при каждом обновлении панели, перезапуске инстанса или через CLI.
+  - Быстрое обновление OpenFlux вручную одной командой:
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/Oleglog/OlConnect_manager/master/server-install/update-openflux.sh | sudo bash
+    ```
   - Автоматическая изоляция трафика (`iptables`, raw-сокеты, `--local-ip`), буферы 16 MiB.
   - Кодек `legacy` (LZ4) по умолчанию для полной совместимости со всеми версиями мобильного клиента OlConnect.
 - **Подписки (`/sub/<slug>`)**:

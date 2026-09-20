@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO="Oleglog/OlConnect_manager"
 # Fallback release used only when the latest tag cannot be resolved from GitHub.
-INSTALLER_VERSION="2.1.9"
+INSTALLER_VERSION="2.2.1"
 RELEASE_TAG=""
 RELEASE_VERSION=""
 CARRIER_DEFAULT="jitsi"
@@ -28,6 +28,7 @@ KEY_FILE=$CONFIG_DIR/key.hex
 
 # ── Flags ────────────────────────────────────────────────────────────────────
 DO_UPDATE=0
+DO_UPDATE_OPENFLUX=0
 DO_UNINSTALL=0
 DO_SHOW_TOKEN=0
 DO_REGENERATE=0
@@ -199,6 +200,47 @@ do_uninstall() {
     echo "[*] olcRTC полностью удалён."
 }
 
+# ── OpenFlux Download/Update ─────────────────────────────────────────────────
+update_openflux() {
+    local arch
+    arch="$(detect_arch)"
+    if [[ "$arch" == unsupported* ]]; then
+        echo "[!] Unsupported architecture: $arch" >&2
+        return 1
+    fi
+    echo "[*] Updating OpenFlux..."
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    local effective_url=""
+    effective_url="$(curl -fsSLI -H "User-Agent: olcrtc-setup" -o /dev/null -w '%{url_effective}' --max-time 10 \
+        "https://github.com/Oleglog/OpenFlux-Android/releases/latest" 2>/dev/null || true)"
+    local tag="${effective_url##*/tag/}"
+    if [ -z "$tag" ] || [ "$tag" = "$effective_url" ]; then
+        tag="latest"
+    fi
+    echo "    OpenFlux tag: $tag"
+    local url="https://github.com/Oleglog/OpenFlux-Android/releases/latest/download/openflux-linux-${arch}"
+    if [ "$tag" != "latest" ]; then
+        url="https://github.com/Oleglog/OpenFlux-Android/releases/download/${tag}/openflux-linux-${arch}"
+    fi
+
+    if curl -fsSL --retry 2 --retry-delay 3 --max-time 300 "$url" -o "$tmpdir/openflux"; then
+        if is_elf "$tmpdir/openflux"; then
+            install -m 0755 "$tmpdir/openflux" /usr/local/bin/openflux
+            mkdir -p /etc/olcrtc
+            if [ "$tag" != "latest" ]; then
+                echo "$tag" > /etc/olcrtc/openflux.version 2>/dev/null || true
+            fi
+            echo "  openflux updated"
+        else
+            echo "  [!] Downloaded openflux is not an ELF binary" >&2
+        fi
+    else
+        echo "  [!] Failed to download openflux binary" >&2
+    fi
+    rm -rf "$tmpdir"
+}
+
 # ── Update ───────────────────────────────────────────────────────────────────
 do_update() {
     echo "[*] Updating binaries..."
@@ -237,8 +279,16 @@ do_update() {
         install -m 0755 "$LAUNCHER_SRC" /usr/local/bin/olcrtc-launcher
         echo "  olcrtc-launcher updated"
     else
-        echo "[!] Launcher source not found, skipping launcher update" >&2
+        if curl -fsSL --retry 2 --max-time 30 "https://raw.githubusercontent.com/${REPO}/master/server-install/systemd/olcrtc-launcher" -o /usr/local/bin/olcrtc-launcher; then
+            chmod +x /usr/local/bin/olcrtc-launcher
+            echo "  olcrtc-launcher updated from GitHub"
+        else
+            echo "[!] Failed to download launcher from GitHub" >&2
+        fi
     fi
+
+    # Update openflux binary from Oleglog/OpenFlux-Android
+    update_openflux || true
 
     rm -rf "$tmpdir"
 
@@ -262,6 +312,7 @@ Options:
     --regenerate                         Regenerate Room ID (jitsi/telemost)
     --regenerate-key                     Regenerate ключ (Room ID не трогается)
     --update                             Update binaries
+    --update-openflux                    Update only OpenFlux binary
     --uninstall                          Full uninstall
     --show-token                         Show admin token
     --status                             Show status
@@ -282,6 +333,7 @@ while [ $# -gt 0 ]; do
         --regenerate) DO_REGENERATE=1; shift ;;
         --regenerate-key) DO_REGENERATE_KEY=1; DO_REGENERATE=1; shift ;;
         --update) DO_UPDATE=1; shift ;;
+        --update-openflux) DO_UPDATE_OPENFLUX=1; shift ;;
         --uninstall) DO_UNINSTALL=1; shift ;;
         --show-token) DO_SHOW_TOKEN=1; shift ;;
         --status) DO_STATUS=1; shift ;;
@@ -303,6 +355,12 @@ fi
 # Handle simple actions first.
 if [ "$DO_UNINSTALL" -eq 1 ]; then do_uninstall; exit 0; fi
 if [ "$DO_UPDATE" -eq 1 ]; then do_update; exit 0; fi
+if [ "$DO_UPDATE_OPENFLUX" -eq 1 ]; then
+    update_openflux
+    systemctl restart olcrtc-server.service 2>/dev/null || true
+    echo "[*] OpenFlux обновлен и сервис перезапущен."
+    exit 0
+fi
 if [ "$DO_SHOW_TOKEN" -eq 1 ]; then
     if [ -f "$ADMIN_ENV" ]; then
         echo "Логин: $(grep '^OLCRTC_ADMIN_USER=' "$ADMIN_ENV" | cut -d= -f2-)"
@@ -438,6 +496,8 @@ if [ ! -f "$TMPDIR/olcrtc-admin-missing" ]; then
     install -m 0755 -o root -g root "$TMPDIR/olcrtc-admin" /usr/local/bin/olcrtc-admin
 fi
 
+update_openflux || true
+
 # Install launcher from bundled file or create inline.
 SCRIPT_DIR=""
 if [ -n "${BASH_SOURCE:-}" ]; then
@@ -472,12 +532,57 @@ if [ "$carrier" = "openflux" ]; then
             iptables -I OUTPUT 1 -p tcp --tcp-flags RST RST -j DROP 2>/dev/null || true
         fi
     fi
+    ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
     OPENFLUX_BIN="/usr/local/bin/openflux"
+
+    # Auto-update / auto-download logic for openflux
+    CHECK_THROTTLE_FILE="/tmp/.openflux_update_check"
+    NEED_CHECK=0
+    if [ ! -x "$OPENFLUX_BIN" ] && [ ! -x "/usr/bin/openflux" ] && [ ! -x "./openflux" ]; then
+        NEED_CHECK=1
+    elif [ "${OLCRTC_OPENFLUX_AUTO_UPDATE:-true}" != "false" ]; then
+        if [ ! -f "$CHECK_THROTTLE_FILE" ] || [ $(($(date +%s) - $(stat -c %Y "$CHECK_THROTTLE_FILE" 2>/dev/null || echo 0))) -gt 3600 ]; then
+            NEED_CHECK=1
+        fi
+    fi
+
+    if [ "$NEED_CHECK" -eq 1 ]; then
+        touch "$CHECK_THROTTLE_FILE" 2>/dev/null || true
+        REMOTE_URL="$(curl -fsSLI -H "User-Agent: olcrtc-launcher" -o /dev/null -w "%{url_effective}" --max-time 4 https://github.com/Oleglog/OpenFlux-Android/releases/latest 2>/dev/null || true)"
+        LATEST_TAG="${REMOTE_URL##*/tag/}"
+        INSTALLED_TAG=""
+        [ -f /etc/olcrtc/openflux.version ] && INSTALLED_TAG="$(cat /etc/olcrtc/openflux.version 2>/dev/null || true)"
+
+        if [ ! -x "$OPENFLUX_BIN" ] || { [ -n "$LATEST_TAG" ] && [ "$LATEST_TAG" != "$REMOTE_URL" ] && [ "$LATEST_TAG" != "$INSTALLED_TAG" ]; }; then
+            echo "Checking OpenFlux binary (installed: ${INSTALLED_TAG:-none}, latest: ${LATEST_TAG:-unknown})..."
+            TMP_BIN="/tmp/openflux-$$.tmp"
+            DL_URL="https://github.com/Oleglog/OpenFlux-Android/releases/latest/download/openflux-linux-${ARCH}"
+            if [ -n "$LATEST_TAG" ] && [ "$LATEST_TAG" != "$REMOTE_URL" ]; then
+                DL_URL="https://github.com/Oleglog/OpenFlux-Android/releases/download/${LATEST_TAG}/openflux-linux-${ARCH}"
+            fi
+            if curl -fsSL --retry 2 --retry-delay 2 --max-time 120 "$DL_URL" -o "$TMP_BIN"; then
+                if [ "$(head -c 4 "$TMP_BIN" | od -An -tx1 | tr -d ' \n')" = "7f454c46" ]; then
+                    install -m 0755 "$TMP_BIN" /usr/local/bin/openflux
+                    mkdir -p /etc/olcrtc
+                    [ -n "$LATEST_TAG" ] && [ "$LATEST_TAG" != "$REMOTE_URL" ] && echo "$LATEST_TAG" > /etc/olcrtc/openflux.version 2>/dev/null || true
+                    echo "openflux binary updated to ${LATEST_TAG:-latest}"
+                    OPENFLUX_BIN="/usr/local/bin/openflux"
+                else
+                    echo "WARNING: Downloaded OpenFlux is not an ELF binary, keeping previous binary" >&2
+                fi
+                rm -f "$TMP_BIN"
+            fi
+        fi
+    fi
+
     if [ ! -x "$OPENFLUX_BIN" ]; then
         if [ -x "/usr/bin/openflux" ]; then
             OPENFLUX_BIN="/usr/bin/openflux"
         elif [ -x "./openflux" ]; then
             OPENFLUX_BIN="./openflux"
+        else
+            echo "ERROR: openflux binary not found and could not be downloaded" >&2
+            exit 1
         fi
     fi
     t="${OLCRTC_TRANSPORT:-yandex}"
