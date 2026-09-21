@@ -774,3 +774,127 @@ func compareSemver(a, b string) int {
 	}
 	return 0
 }
+
+func fetchLatestOpenFluxTag() (string, error) {
+	const url = "https://github.com/Oleglog/OpenFlux-Android/releases/latest"
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "olcrtc-admin/"+Version)
+	client := &http.Client{
+		Timeout: 8 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	loc := resp.Header.Get("Location")
+	idx := strings.LastIndex(loc, "/tag/")
+	if idx < 0 {
+		return "", fmt.Errorf("unexpected Location: %s", loc)
+	}
+	return strings.TrimSpace(loc[idx+len("/tag/"):]), nil
+}
+
+func (s *Server) handleOpenFluxStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	installed := false
+	installedVersion := ""
+	if _, err := os.Stat("/usr/local/bin/openflux"); err == nil {
+		installed = true
+	} else if _, err := os.Stat("/usr/bin/openflux"); err == nil {
+		installed = true
+	}
+
+	if data, err := os.ReadFile("/etc/olcrtc/openflux.version"); err == nil {
+		installedVersion = strings.TrimSpace(string(data))
+	} else if installed {
+		installedVersion = "установлен"
+	}
+
+	latestTag, _ := fetchLatestOpenFluxTag()
+
+	updateAvailable := false
+	if installed && latestTag != "" && installedVersion != latestTag && installedVersion != "v"+latestTag {
+		updateAvailable = true
+	} else if !installed && latestTag != "" {
+		updateAvailable = true
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"installed":         installed,
+		"installed_version": installedVersion,
+		"latest_version":    latestTag,
+		"update_available":  updateAvailable,
+	})
+}
+
+func (s *Server) handleOpenFluxUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	latestTag, err := fetchLatestOpenFluxTag()
+	if err != nil || latestTag == "" {
+		http.Error(w, fmt.Sprintf("Не удалось определить актуальную версию OpenFlux: %v", err), http.StatusBadGateway)
+		return
+	}
+
+	arch := runtime.GOARCH
+	if arch != "amd64" && arch != "arm64" {
+		http.Error(w, fmt.Sprintf("Неподдерживаемая архитектура: %s", arch), http.StatusBadRequest)
+		return
+	}
+
+	cmd := exec.Command("bash", "-c", fmt.Sprintf(`
+set -euo pipefail
+ARCH="%s"
+TAG="%s"
+TMPDIR=$(mktemp -d)
+trap "rm -rf $TMPDIR" EXIT
+
+DL_URL="https://github.com/Oleglog/OpenFlux-Android/releases/download/${TAG}/openflux-linux-${ARCH}"
+curl -fsSL --retry 2 --retry-delay 2 --max-time 120 "$DL_URL" -o "$TMPDIR/openflux"
+curl -fsSL --retry 2 --retry-delay 2 --max-time 60 "https://github.com/Oleglog/OpenFlux-Android/releases/download/${TAG}/SHA256SUMS" -o "$TMPDIR/SHA256SUMS" 2>/dev/null || true
+
+if [ -f "$TMPDIR/SHA256SUMS" ] && command -v sha256sum >/dev/null 2>&1; then
+    EXPECTED_HASH=$(grep -E "[[:space:]]openflux-linux-${ARCH}$" "$TMPDIR/SHA256SUMS" 2>/dev/null | awk '{print $1}')
+    if [ -n "$EXPECTED_HASH" ]; then
+        ACTUAL_HASH=$(sha256sum "$TMPDIR/openflux" | awk '{print $1}')
+        if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
+            echo "Checksum mismatch" >&2
+            exit 1
+        fi
+    fi
+fi
+
+chmod +x "$TMPDIR/openflux"
+install -m 0755 "$TMPDIR/openflux" /usr/local/bin/openflux
+mkdir -p /etc/olcrtc
+echo "${TAG}" > /etc/olcrtc/openflux.version
+systemctl restart openflux@* 2>/dev/null || true
+`, arch, latestTag))
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		logger.Errorf("openflux update failed: %v, out: %s", err, string(out))
+		http.Error(w, fmt.Sprintf("Ошибка обновления: %v (%s)", err, string(out)), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"version": latestTag,
+		"message": "Бинарник OpenFlux успешно обновлен до " + latestTag,
+	})
+}

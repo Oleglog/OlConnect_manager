@@ -1653,6 +1653,90 @@ async function renderSettings(app) {
   paneUpdates.appendChild(updateCard);
   loadReleasesIntoSelect();
 
+  // OpenFlux Binary Card
+  const openfluxCard = el('div', 'card p-5 flex flex-col gap-3');
+  openfluxCard.innerHTML = `
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        ${icon('layers', 18)}
+        <h3 class="font-bold text-base" style="color:var(--color-ink);">Бинарник OpenFlux (Exit-Node)</h3>
+      </div>
+      <span id="openfluxBadge" class="badge" style="background:var(--color-surface-hover); color:var(--color-ink);">Проверка...</span>
+    </div>
+    <div class="text-xs" style="color:var(--color-ink-subtle);">
+      Исполняемый файл exit-ноды OpenFlux (/usr/local/bin/openflux) для туннелирования трафика через Яндекс и Mail.ru Документы.
+    </div>
+    <div id="openfluxInfoRow" class="text-xs" style="color:var(--color-ink-muted); display:none;">
+      Установлена: <strong id="openfluxInstalledVer">—</strong> &bull; Доступна: <strong id="openfluxLatestVer">—</strong>
+    </div>
+    <div class="flex gap-2 flex-wrap items-center mt-1">
+      <button id="openfluxCheckBtn" class="btn btn-secondary btn-sm">${icon('refresh-cw', 14)}<span>Проверить</span></button>
+      <button id="openfluxUpdateBtn" class="btn btn-primary btn-sm" style="display:none;">${icon('download', 14)}<span>Обновить OpenFlux</span></button>
+    </div>
+  `;
+
+  const ofBadge = openfluxCard.querySelector('#openfluxBadge');
+  const ofInfoRow = openfluxCard.querySelector('#openfluxInfoRow');
+  const ofInstalledVer = openfluxCard.querySelector('#openfluxInstalledVer');
+  const ofLatestVer = openfluxCard.querySelector('#openfluxLatestVer');
+  const ofCheckBtn = openfluxCard.querySelector('#openfluxCheckBtn');
+  const ofUpdateBtn = openfluxCard.querySelector('#openfluxUpdateBtn');
+
+  async function loadOpenFluxStatus() {
+    try {
+      const res = await api('/system/openflux/status');
+      ofInfoRow.style.display = '';
+      ofInstalledVer.textContent = res.installed_version || (res.installed ? 'установлен' : 'не установлен');
+      ofLatestVer.textContent = res.latest_version || 'неизвестно';
+      if (!res.installed) {
+        ofBadge.className = 'badge badge-warning';
+        ofBadge.textContent = 'Не установлен';
+        ofUpdateBtn.style.display = '';
+        ofUpdateBtn.querySelector('span').textContent = 'Установить OpenFlux';
+      } else if (res.update_available) {
+        ofBadge.className = 'badge badge-info';
+        ofBadge.textContent = 'Доступно: ' + res.latest_version;
+        ofUpdateBtn.style.display = '';
+        ofUpdateBtn.querySelector('span').textContent = 'Обновить до ' + res.latest_version;
+      } else {
+        ofBadge.className = 'badge badge-success';
+        ofBadge.textContent = res.installed_version || 'Актуальная версия';
+        ofUpdateBtn.style.display = 'none';
+      }
+    } catch (e) {
+      ofBadge.className = 'badge';
+      ofBadge.textContent = 'Ошибка проверки';
+    }
+  }
+
+  ofCheckBtn.onclick = async () => {
+    await withLoading(ofCheckBtn, async () => {
+      await loadOpenFluxStatus();
+      showToast('Статус OpenFlux проверен', 'info');
+    });
+  };
+
+  ofUpdateBtn.onclick = async () => {
+    const ok = await showConfirm({
+      title: 'Обновить OpenFlux?',
+      message: 'Бинарник /usr/local/bin/openflux будет обновлен до актуальной версии с GitHub Releases. Все запущенные инстансы OpenFlux будут перезапущены.',
+      confirmText: 'Обновить',
+    });
+    if (!ok) return;
+    await withLoading(ofUpdateBtn, async () => {
+      try {
+        const res = await api('/system/openflux/update', { method: 'POST' });
+        showToast(res.message || 'OpenFlux успешно обновлен', 'success');
+        await loadOpenFluxStatus();
+      } catch (e) {
+        showToast('Ошибка обновления: ' + e.message, 'error');
+      }
+    });
+  };
+
+  paneUpdates.appendChild(openfluxCard);
+  loadOpenFluxStatus();
+
   // Logs Card
   const logsCard = el('div', 'card p-5 flex flex-col gap-3');
   logsCard.innerHTML = `
