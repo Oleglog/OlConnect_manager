@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO="Oleglog/OlConnect_manager"
 # Fallback release used only when the latest tag cannot be resolved from GitHub.
-INSTALLER_VERSION="2.3.2"
+INSTALLER_VERSION="2.3.3"
 RELEASE_TAG=""
 RELEASE_VERSION=""
 CARRIER_DEFAULT="jitsi"
@@ -599,12 +599,29 @@ if [ "$carrier" = "openflux" ]; then
     if [ -n "${OLCRTC_DEBUG:-}" ] && [ "$OLCRTC_DEBUG" != "0" ] && [ "$OLCRTC_DEBUG" != "false" ]; then
         debug_flag="--debug"
     fi
-    codec_flag="--codec ${OLCRTC_CODEC:-legacy}"
+    codec="${OLCRTC_OPENFLUX_CODEC:-${OLCRTC_CODEC:-batched}}"
+    codec_flag="--codec $codec"
     key_flag=""
     if [ -n "${OLCRTC_OPENFLUX_KEY:-${OPENFLUX_KEY:-}}" ]; then
         key_flag="--encryption-key ${OLCRTC_OPENFLUX_KEY:-${OPENFLUX_KEY}}"
     fi
-    exec "$OPENFLUX_BIN" --exit-node --url "${OLCRTC_ROOM_ID}" --transport "$t" $mode_flag $local_ip_flag $codec_flag $key_flag $debug_flag
+    proxy_flags=""
+    if [ -n "${OLCRTC_WARP_PROXY:-}" ]; then
+        proxy_flags="$proxy_flags --warp-proxy ${OLCRTC_WARP_PROXY}"
+    fi
+    if [ -n "${OLCRTC_SOCKS_PROXY:-}" ]; then
+        proxy_flags="$proxy_flags --socks-proxy ${OLCRTC_SOCKS_PROXY}"
+        p_url="${OLCRTC_SOCKS_PROXY}"
+        [[ "$p_url" != *"://"* ]] && p_url="socks5://${p_url}"
+        export ALL_PROXY="$p_url"
+        export HTTP_PROXY="$p_url"
+        export HTTPS_PROXY="$p_url"
+        export all_proxy="$p_url"
+        export http_proxy="$p_url"
+        export https_proxy="$p_url"
+        echo "Using SOCKS proxy for OpenFlux signaling: $p_url"
+    fi
+    exec "$OPENFLUX_BIN" --exit-node --url "${OLCRTC_ROOM_ID}" --transport "$t" $mode_flag $local_ip_flag $codec_flag $key_flag $proxy_flags $debug_flag
 fi
 
 if [ -z "$carrier" ] || [ -z "${OLCRTC_ROOM_ID:-}" ] || [ -z "${OLCRTC_KEY:-}" ]; then

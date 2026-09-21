@@ -137,7 +137,8 @@ if [ "$carrier" = "openflux" ]; then
     if [ -n "${OLCRTC_DEBUG:-}" ] && [ "$OLCRTC_DEBUG" != "0" ] && [ "$OLCRTC_DEBUG" != "false" ]; then
         debug_flag="--debug"
     fi
-    codec_flag="--codec ${OLCRTC_CODEC:-legacy}"
+    codec="${OLCRTC_OPENFLUX_CODEC:-${OLCRTC_CODEC:-batched}}"
+    codec_flag="--codec $codec"
     key_flag=""
     if [ -n "${OLCRTC_OPENFLUX_KEY:-${OPENFLUX_KEY:-}}" ]; then
         key_flag="--encryption-key ${OLCRTC_OPENFLUX_KEY:-${OPENFLUX_KEY}}"

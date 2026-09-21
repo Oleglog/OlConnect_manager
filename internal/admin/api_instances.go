@@ -329,11 +329,12 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 		if openfluxKey != "" {
 			vals["OLCRTC_OPENFLUX_KEY"] = openfluxKey
 		}
+		codec := "batched"
 		if openfluxCodec != "" {
-			vals["OLCRTC_OPENFLUX_CODEC"] = openfluxCodec
-		} else {
-			vals["OLCRTC_OPENFLUX_CODEC"] = "batched"
+			codec = openfluxCodec
 		}
+		vals["OLCRTC_OPENFLUX_CODEC"] = codec
+		vals["OLCRTC_CODEC"] = codec
 	}
 	vals["OLCRTC_JITSI_BRIDGE_MODE"] = jitsiBridgeMode
 	if jitsiSCTPMaxMessageSize != "" {
@@ -506,8 +507,10 @@ func buildInstanceConfigUpdates(req map[string]any) map[string]string {
 		codec := strings.TrimSpace(strings.ToLower(v))
 		if codec == "legacy" {
 			updates["OLCRTC_OPENFLUX_CODEC"] = "legacy"
+			updates["OLCRTC_CODEC"] = "legacy"
 		} else {
 			updates["OLCRTC_OPENFLUX_CODEC"] = "batched"
+			updates["OLCRTC_CODEC"] = "batched"
 		}
 	}
 	if v, ok := req["dns"].(string); ok {
@@ -774,6 +777,9 @@ func (s *Server) buildInstance(id int) Instance {
 	openfluxKey := strings.TrimSpace(vals["OLCRTC_OPENFLUX_KEY"])
 	openfluxCodec := strings.TrimSpace(vals["OLCRTC_OPENFLUX_CODEC"])
 	if openfluxCodec == "" {
+		openfluxCodec = strings.TrimSpace(vals["OLCRTC_CODEC"])
+	}
+	if openfluxCodec == "" {
 		openfluxCodec = "batched"
 	}
 
@@ -877,7 +883,11 @@ func (s *Server) buildCompactURIWith(vals map[string]string, clientID string) st
 		if encKey := strings.TrimSpace(vals["OLCRTC_OPENFLUX_KEY"]); encKey != "" {
 			uri += "&k=" + url.QueryEscape(encKey)
 		}
-		if codec := strings.TrimSpace(vals["OLCRTC_OPENFLUX_CODEC"]); codec != "" && codec != "batched" {
+		codec := strings.TrimSpace(vals["OLCRTC_OPENFLUX_CODEC"])
+		if codec == "" {
+			codec = strings.TrimSpace(vals["OLCRTC_CODEC"])
+		}
+		if codec != "" && codec != "batched" {
 			uri += "&c=" + url.QueryEscape(codec)
 		}
 		uri += "#" + url.QueryEscape(name)
@@ -948,7 +958,11 @@ func (s *Server) buildURIWith(vals map[string]string, clientID string) string {
 		if encKey := strings.TrimSpace(vals["OLCRTC_OPENFLUX_KEY"]); encKey != "" {
 			uri += "&k=" + url.QueryEscape(encKey)
 		}
-		if codec := strings.TrimSpace(vals["OLCRTC_OPENFLUX_CODEC"]); codec != "" && codec != "batched" {
+		codec := strings.TrimSpace(vals["OLCRTC_OPENFLUX_CODEC"])
+		if codec == "" {
+			codec = strings.TrimSpace(vals["OLCRTC_CODEC"])
+		}
+		if codec != "" && codec != "batched" {
 			uri += "&c=" + url.QueryEscape(codec)
 		}
 		uri += "#" + url.QueryEscape(name)
