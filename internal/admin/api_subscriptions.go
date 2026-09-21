@@ -135,6 +135,40 @@ func (s *Server) removeLinkedSubscriptionInstance(id int) ([]string, int64, erro
 	return result.Updated, result.Removed, nil
 }
 
+func (s *Server) refreshLinkedSubscriptionInstance(id int, uri string) error {
+	if !s.subscriptions.enabled() || uri == "" {
+		return nil
+	}
+	body, err := json.Marshal(map[string]map[int]string{
+		"uris": {id: uri},
+	})
+	if err != nil {
+		return err
+	}
+	urlStr, ok := s.subscriptions.endpointURL("/api/subscriptions/refresh-linked")
+	if !ok {
+		return fmt.Errorf("subscription backend is unavailable")
+	}
+	req, err := http.NewRequest(http.MethodPost, urlStr, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token := s.subscriptions.token(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := (&http.Client{Timeout: 90 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("subscription refresh status %d: %s", resp.StatusCode, strings.TrimSpace(string(message)))
+	}
+	return nil
+}
+
 func (s *Server) doProxy(w http.ResponseWriter, req *http.Request) {
 	timeout := 10 * time.Second
 	if req.Method == http.MethodDelete || (req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/mirror")) {

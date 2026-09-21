@@ -565,7 +565,7 @@ function renderSubscriptionsBlock(subs, subsError, instances, sys) {
   } else if (!subs || subs.length === 0) {
     subList.appendChild(el('div', 'text-gray-400 text-sm', 'Нет подписок'));
   } else {
-    subs.forEach(sub => subList.appendChild(renderSubRow(sub, instances, sys)));
+    subs.forEach(sub => subList.appendChild(renderSubRow(sub, instances, sys, subs)));
   }
   subSection.appendChild(subList);
   return subSection;
@@ -865,17 +865,11 @@ function renderInstanceCard(inst, context = {}) {
   }
   card.appendChild(badges);
 
-  // Room ID + Client ID rows
+  // Meta rows
   const meta = el('div', 'space-y-1.5 text-xs');
   meta.appendChild(metaRow(inst.carrier === 'openflux' ? 'Ссылка на документ' : 'Room ID', inst.room_id || '—', inst.room_id));
-  if (inst.client_id) {
-    meta.appendChild(metaRow('Client ID', inst.client_id, inst.client_id));
-  }
   if (inst.has_auth_token) {
     meta.appendChild(metaRow('Auth token', 'задан', 'QR включает токен для импорта полного профиля'));
-  }
-  if (inst.carrier === 'openflux') {
-    meta.appendChild(metaRow('Шифрование', inst.has_openflux_key ? 'AES-256-GCM' : 'отключено', inst.has_openflux_key ? 'Ключ включён в QR и URI (&k=...)' : ''));
   }
   card.appendChild(meta);
 
@@ -1015,7 +1009,7 @@ function metaRow(label, value, copyValue) {
   return row;
 }
 
-function renderSubRow(sub, instances, sys) {
+function renderSubRow(sub, instances, sys, allSubs) {
   const row = el('div', 'card p-3 flex flex-col md:flex-row md:items-center justify-between gap-2');
   const subBase = (sys.subscription_public_url || sys.admin_url || location.origin).replace(/\/+$/, '');
   const subURL = subBase + '/sub/' + sub.slug;
@@ -1032,7 +1026,7 @@ function renderSubRow(sub, instances, sys) {
   viewBtn.onclick = () => window.open(subURL, '_blank');
   const compositionBtn = el('button', 'btn btn-secondary btn-sm');
   compositionBtn.innerHTML = icon('settings') + '<span>Состав</span>';
-  compositionBtn.onclick = () => showManageSubInstancesModal(sub, instances);
+  compositionBtn.onclick = () => showManageSubInstancesModal(sub, instances, allSubs);
   const qrBtn = el('button', 'btn btn-secondary btn-sm');
   qrBtn.innerHTML = icon('qr-code') + '<span>QR</span>';
   qrBtn.title = 'QR подписки: URL + encrypted mirror';
@@ -2286,9 +2280,14 @@ function showCreateInstanceModal() {
   openfluxKeyRow.appendChild(genKeyBtn);
   openfluxKeyRow.appendChild(clearKeyBtn);
   openfluxKeySec.appendChild(openfluxKeyRow);
-  const openfluxKeyHint = el('div', 'mt-1.5 text-xs text-gray-500');
+  const openfluxKeyHint = el('div', 'mt-1.5 text-xs text-gray-500 mb-3');
   openfluxKeyHint.textContent = 'Если ключ указан, exit-node и клиенты шифруют весь трафик по AES-256-GCM. Ключ автоматически добавится в QR-код и ссылку (&k=...).';
   openfluxKeySec.appendChild(openfluxKeyHint);
+  const openfluxCodecField = makeSelectField('Кодек / формат кадров', icon('sliders-horizontal', 14), 'batched', [
+    { value: 'batched', label: 'Batched (ZSTD + пачки, рекомендуется)' },
+    { value: 'legacy', label: 'Legacy (LZ4 per-packet)' },
+  ]);
+  openfluxKeySec.appendChild(openfluxCodecField.field);
   connectionSec.appendChild(openfluxKeySec);
 
   const dcWarn = el('div', 'p-2 mb-3 text-xs rounded border border-red-500/50 bg-red-500/10 text-red-200 hidden');
@@ -2407,6 +2406,7 @@ function showCreateInstanceModal() {
     vp8Block.classList.toggle('hidden', finalTransport !== 'vp8channel');
     jitsiBlock.classList.toggle('hidden', !(c === 'jitsi' && finalTransport === 'datachannel'));
     dcWarn.classList.toggle('hidden', isCompatible || finalTransport !== 'datachannel');
+    authTokenField.field.classList.toggle('hidden', c !== 'wbstream');
     wbHint.classList.toggle('hidden', c !== 'wbstream');
     wbAcquireBtn.classList.toggle('hidden', c !== 'wbstream');
     jitsiPresets.classList.toggle('hidden', c !== 'jitsi');
@@ -2423,12 +2423,24 @@ function showCreateInstanceModal() {
     }
 
     // Auto-rename
-    const carriers = { jitsi: 'jitsi', telemost: 'telemost', wbstream: 'wbstream' };
-    const cp = carriers[c] || c;
-    nameField.input.value = cp + '_olcrtc' + (finalTransport && finalTransport !== 'vp8channel' ? '_' + finalTransport : '');
+    if (c === 'openflux') {
+      const room = roomIDField.input.value.trim();
+      if (finalTransport === 'mailru' || room.includes('mail.ru')) {
+        nameField.input.value = 'OpenFlux Mail.ru';
+      } else {
+        nameField.input.value = 'OpenFlux Yandex';
+      }
+    } else {
+      const carriers = { jitsi: 'jitsi', telemost: 'telemost', wbstream: 'wbstream' };
+      const cp = carriers[c] || c;
+      nameField.input.value = cp + '_olcrtc' + (finalTransport && finalTransport !== 'vp8channel' ? '_' + finalTransport : '');
+    }
   }
   carrierField.input.addEventListener('change', updateVisibility);
   transportField.input.addEventListener('change', updateVisibility);
+  roomIDField.input.addEventListener('input', () => {
+    if (carrierField.input.value === 'openflux') updateVisibility();
+  });
 
   // Footer
   const btnRow = el('div', 'flex gap-2 justify-end mt-2');
@@ -2470,8 +2482,11 @@ function showCreateInstanceModal() {
       traffic_min_delay: trafficMinDelayField.input.value.trim(),
       traffic_max_delay: trafficMaxDelayField.input.value.trim(),
     };
-    if (carrier === 'openflux' && openfluxKeyInput.value.trim()) {
-      body.openflux_key = openfluxKeyInput.value.trim();
+    if (carrier === 'openflux') {
+      if (openfluxKeyInput.value.trim()) {
+        body.openflux_key = openfluxKeyInput.value.trim();
+      }
+      body.openflux_codec = openfluxCodecField.input.value;
     }
     await withLoading(createBtn, async () => {
       try {
@@ -2618,9 +2633,14 @@ function showConfigModal(inst) {
   openfluxKeyRow.appendChild(genKeyBtn);
   openfluxKeyRow.appendChild(clearKeyBtn);
   openfluxKeySec.appendChild(openfluxKeyRow);
-  const openfluxKeyHint = el('div', 'mt-1.5 text-xs text-gray-500');
+  const openfluxKeyHint = el('div', 'mt-1.5 text-xs text-gray-500 mb-3');
   openfluxKeyHint.textContent = 'При наличии ключа exit-node и мобильный клиент шифруют трафик (AES-256-GCM). Ключ добавляется в QR-код и ссылку (&k=...).';
   openfluxKeySec.appendChild(openfluxKeyHint);
+  const openfluxCodecField = makeSelectField('Кодек / формат кадров', icon('sliders-horizontal', 14), inst.openflux_codec || 'batched', [
+    { value: 'batched', label: 'Batched (ZSTD + пачки, рекомендуется)' },
+    { value: 'legacy', label: 'Legacy (LZ4 per-packet)' },
+  ]);
+  openfluxKeySec.appendChild(openfluxCodecField.field);
   connectionSec.appendChild(openfluxKeySec);
   div.appendChild(connectionSec);
 
@@ -2653,16 +2673,6 @@ function showConfigModal(inst) {
   advHeader.appendChild(chevron);
   advSec.appendChild(advHeader);
   const advBody = el('div', 'mt-3');
-
-  const debugRow = el('label', 'flex items-center gap-2 cursor-pointer mb-3 text-sm');
-  const debugCb = el('input', '');
-  debugCb.type = 'checkbox';
-  debugCb.checked = inst.debug || false;
-  debugCb.style.width = 'auto';
-  debugCb.style.minHeight = 'auto';
-  debugRow.appendChild(debugCb);
-  debugRow.appendChild(el('span', '', 'Debug logging'));
-  advBody.appendChild(debugRow);
 
   const jitsiBlock = el('div', 'border border-gray-700 rounded-lg p-3 mb-3 hidden');
   jitsiBlock.innerHTML = '<div class="text-xs text-gray-400 mb-2">Jitsi DataChannel / SCTP</div>';
@@ -2760,10 +2770,15 @@ function showConfigModal(inst) {
 
     // Auto-rename instance when carrier changes
     const curName = nameField.input.value;
-    const carriers = { jitsi: 'jitsi', telemost: 'telemost', wbstream: 'wbstream' };
-    const carrierPrefix = carriers[c] || c;
-    // If current name matches a known carrier pattern, update it
-    if (/^(jitsi|telemost|wbstream)_olcrtc/.test(curName) || curName === '') {
+    if (c === 'openflux') {
+      const room = roomIDField.input.value.trim();
+      const t = transportField.input.value;
+      if (t === 'mailru' || room.includes('mail.ru')) {
+        nameField.input.value = 'OpenFlux Mail.ru';
+      } else {
+        nameField.input.value = 'OpenFlux Yandex';
+      }
+    } else if (/^(jitsi|telemost|wbstream)_olcrtc/.test(curName) || /^OpenFlux/.test(curName) || curName === '') {
       const t = transportField.input.value;
       nameField.input.value = carrierPrefix + '_olcrtc' + (t && t !== 'vp8channel' ? '_' + t : '');
     }
@@ -2775,7 +2790,14 @@ function showConfigModal(inst) {
     const carriers = { jitsi: 'jitsi', telemost: 'telemost', wbstream: 'wbstream' };
     const carrierPrefix = carriers[c] || c;
     const curName = nameField.input.value;
-    if (/^(jitsi|telemost|wbstream)_olcrtc/.test(curName) || curName === '') {
+    if (c === 'openflux') {
+      const room = roomIDField.input.value.trim();
+      if (t === 'mailru' || room.includes('mail.ru')) {
+        nameField.input.value = 'OpenFlux Mail.ru';
+      } else {
+        nameField.input.value = 'OpenFlux Yandex';
+      }
+    } else if (/^(jitsi|telemost|wbstream)_olcrtc/.test(curName) || /^OpenFlux/.test(curName) || curName === '') {
       nameField.input.value = carrierPrefix + '_olcrtc' + (t && t !== 'vp8channel' ? '_' + t : '');
     }
     updateVisibility();
@@ -2790,6 +2812,8 @@ function showConfigModal(inst) {
     vp8Block.classList.toggle('hidden', t !== 'vp8channel');
     seiBlock.classList.toggle('hidden', t !== 'seichannel');
     jitsiBlock.classList.toggle('hidden', !(c === 'jitsi' && t === 'datachannel'));
+    authTokenField.field.classList.toggle('hidden', c !== 'wbstream');
+    clientIDWrap.field.classList.toggle('hidden', c === 'openflux');
     wbHint.classList.toggle('hidden', c !== 'wbstream');
     jitsiPresets.classList.toggle('hidden', c !== 'jitsi');
     openfluxKeySec.classList.toggle('hidden', c !== 'openflux');
@@ -2810,6 +2834,9 @@ function showConfigModal(inst) {
   }
   carrierField.input.addEventListener('change', () => { updateTransportOptions(); });
   transportField.input.addEventListener('change', () => { updateNameFromTransport(); });
+  roomIDField.input.addEventListener('input', () => {
+    if (carrierField.input.value === 'openflux') updateNameFromTransport();
+  });
   updateVisibility();
 
   // Footer actions
@@ -2843,7 +2870,7 @@ function showConfigModal(inst) {
       dns: dnsField.input.value,
       socks_proxy: socksField.input.value,
       warp_proxy: warpField.input.value,
-      debug: debugCb.checked,
+      debug: false,
       jitsi_bridge_mode: bridgeModeField.input.value,
       jitsi_sctp_max_message_size: jitsiSCTPMaxMessageField.input.value.trim(),
       traffic_max_payload_size: trafficPayloadField.input.value.trim(),
@@ -2857,6 +2884,7 @@ function showConfigModal(inst) {
       } else if (openfluxKeyCleared || inst.has_openflux_key) {
         body.clear_openflux_key = true;
       }
+      body.openflux_codec = openfluxCodecField.input.value;
     }
     const authToken = authTokenField.input.value.trim();
     if (authToken) {
@@ -2909,9 +2937,11 @@ function makeSelectField(label, iconHTML, value, options) {
   const { field, labelEl } = makeFieldShell(label, iconHTML);
   const input = el('select', '');
   options.forEach(o => {
-    const opt = el('option', '', o);
-    opt.value = o;
-    if (o === value) opt.selected = true;
+    const val = typeof o === 'object' && o !== null ? o.value : o;
+    const txt = typeof o === 'object' && o !== null ? o.label : o;
+    const opt = el('option', '', txt);
+    opt.value = val;
+    if (val === value) opt.selected = true;
     input.appendChild(opt);
   });
   const inputID = 'fld-' + Math.random().toString(36).slice(2, 9);
@@ -2949,7 +2979,7 @@ function makeReadonlyWithRotate(label, iconHTML, value, onRotate) {
 }
 
 // ── Subscription modals ──────────────────────────────────────────────────────
-async function showManageSubInstancesModal(sub, instances) {
+async function showManageSubInstancesModal(sub, instances, allSubs) {
   const div = el('div', '');
   const title = el('h3', 'text-lg font-semibold mb-1', 'Состав подписки «' + sub.name + '»');
   div.appendChild(title);
@@ -2981,8 +3011,27 @@ async function showManageSubInstancesModal(sub, instances) {
   cancelBtn.onclick = () => closeModal(overlay);
 
   let subscriptionInstances;
+  const otherSubsMemberships = new Map();
   try {
     subscriptionInstances = await api('/subs/' + sub.slug + '/instances');
+    if (Array.isArray(allSubs) && allSubs.length > 1) {
+      const otherSubs = allSubs.filter(s => s.slug !== sub.slug);
+      const results = await Promise.allSettled(
+        otherSubs.map(s => api('/subs/' + s.slug + '/instances').then(items => ({ sub: s, items })))
+      );
+      results.forEach(res => {
+        if (res.status === 'fulfilled' && Array.isArray(res.value.items)) {
+          const sName = res.value.sub.name || res.value.sub.slug;
+          res.value.items.forEach(entry => {
+            if (entry.source_instance_id !== null && entry.source_instance_id !== undefined) {
+              const srcId = String(entry.source_instance_id);
+              if (!otherSubsMemberships.has(srcId)) otherSubsMemberships.set(srcId, new Set());
+              otherSubsMemberships.get(srcId).add(sName);
+            }
+          });
+        }
+      });
+    }
   } catch (e) {
     list.innerHTML = '';
     list.appendChild(el('div', 'text-rose-400 text-sm', 'Ошибка: ' + e.message));
@@ -3029,6 +3078,12 @@ async function showManageSubInstancesModal(sub, instances) {
     nameRow.appendChild(state);
     info.appendChild(nameRow);
     info.appendChild(el('div', 'text-xs text-gray-500 truncate', '#' + inst.id + ' — ' + (inst.carrier || '-') + ' / ' + (inst.transport || '-')));
+    const otherSubNames = Array.from(otherSubsMemberships.get(String(inst.id)) || []);
+    if (otherSubNames.length > 0) {
+      const otherRow = el('div', 'text-xs text-indigo-400 mt-0.5 truncate');
+      otherRow.textContent = 'В подписках: ' + otherSubNames.join(', ');
+      info.appendChild(otherRow);
+    }
 
     const updateState = () => {
       state.className = 'badge';

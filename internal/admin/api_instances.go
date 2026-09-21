@@ -38,6 +38,7 @@ type Instance struct {
 	AuthTokenExpired        bool   `json:"auth_token_expired"`
 	HasOpenFluxKey          bool   `json:"has_openflux_key"`
 	OpenFluxKey             string `json:"openflux_key,omitempty"`
+	OpenFluxCodec           string `json:"openflux_codec,omitempty"`
 	Name                    string `json:"name"`
 	Status                  string `json:"status"`
 	Uptime                  string `json:"uptime"`
@@ -220,6 +221,7 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 	trafficMaxDelay := ""
 	authToken := ""
 	openfluxKey := ""
+	openfluxCodec := "batched"
 	if r.Body != nil {
 		var req struct {
 			Carrier                 string `json:"carrier"`
@@ -228,6 +230,7 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 			RoomID                  string `json:"room_id"`
 			AuthToken               string `json:"auth_token"`
 			OpenFluxKey             string `json:"openflux_key"`
+			OpenFluxCodec           string `json:"openflux_codec"`
 			VP8FPS                  any    `json:"vp8_fps"`
 			VP8Batch                any    `json:"vp8_batch"`
 			DNS                     string `json:"dns"`
@@ -252,6 +255,9 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 			roomID = req.RoomID
 			authToken = strings.TrimSpace(req.AuthToken)
 			openfluxKey = strings.TrimSpace(req.OpenFluxKey)
+			if strings.TrimSpace(req.OpenFluxCodec) != "" {
+				openfluxCodec = strings.TrimSpace(strings.ToLower(req.OpenFluxCodec))
+			}
 			if req.VP8FPS != nil {
 				vp8FPS = sanitizeUnsignedAny(req.VP8FPS)
 			}
@@ -271,10 +277,18 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if name == "" {
-		name = fmt.Sprintf("%s_olcrtc_%d", carrier, newID+1)
-	}
 	roomID = strings.TrimSpace(roomID)
+	if name == "" {
+		if carrier == "openflux" {
+			if transport == "mailru" || strings.Contains(roomID, "mail.ru") {
+				name = "OpenFlux Mail.ru"
+			} else {
+				name = "OpenFlux Yandex"
+			}
+		} else {
+			name = fmt.Sprintf("%s_olcrtc_%d", carrier, newID+1)
+		}
+	}
 	if !isCarrierTransportCompatible(carrier, transport) {
 		http.Error(w, "incompatible carrier and transport: "+carrier+"+"+transport, http.StatusBadRequest)
 		return
@@ -311,8 +325,15 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 	if authToken != "" {
 		vals["OLCRTC_AUTH_TOKEN"] = authToken
 	}
-	if carrier == "openflux" && openfluxKey != "" {
-		vals["OLCRTC_OPENFLUX_KEY"] = openfluxKey
+	if carrier == "openflux" {
+		if openfluxKey != "" {
+			vals["OLCRTC_OPENFLUX_KEY"] = openfluxKey
+		}
+		if openfluxCodec != "" {
+			vals["OLCRTC_OPENFLUX_CODEC"] = openfluxCodec
+		} else {
+			vals["OLCRTC_OPENFLUX_CODEC"] = "batched"
+		}
 	}
 	vals["OLCRTC_JITSI_BRIDGE_MODE"] = jitsiBridgeMode
 	if jitsiSCTPMaxMessageSize != "" {
@@ -442,7 +463,12 @@ func (s *Server) updateInstanceConfig(w http.ResponseWriter, r *http.Request, id
 	svc := InstanceService(id)
 	_ = SystemctlRestart(svc)
 
-	writeJSON(w, http.StatusOK, s.buildInstance(id))
+	inst := s.buildInstance(id)
+	if inst != nil && inst.SubscriptionURI != "" {
+		_ = s.refreshLinkedSubscriptionInstance(id, inst.SubscriptionURI)
+	}
+
+	writeJSON(w, http.StatusOK, inst)
 }
 
 // buildInstanceConfigUpdates maps a parsed config request body to the
@@ -475,6 +501,14 @@ func buildInstanceConfigUpdates(req map[string]any) map[string]string {
 	}
 	if v, ok := req["clear_openflux_key"].(bool); ok && v {
 		updates["OLCRTC_OPENFLUX_KEY"] = ""
+	}
+	if v, ok := req["openflux_codec"].(string); ok {
+		codec := strings.TrimSpace(strings.ToLower(v))
+		if codec == "legacy" {
+			updates["OLCRTC_OPENFLUX_CODEC"] = "legacy"
+		} else {
+			updates["OLCRTC_OPENFLUX_CODEC"] = "batched"
+		}
 	}
 	if v, ok := req["dns"].(string); ok {
 		updates["OLCRTC_DNS"] = v
@@ -599,6 +633,9 @@ func (s *Server) rotateKey(w http.ResponseWriter, id int) {
 	}
 	svc := InstanceService(id)
 	_ = SystemctlRestart(svc)
+	if inst := s.buildInstance(id); inst != nil && inst.SubscriptionURI != "" {
+		_ = s.refreshLinkedSubscriptionInstance(id, inst.SubscriptionURI)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "key": keyHex})
 }
 
@@ -624,6 +661,9 @@ func (s *Server) rotateRoom(w http.ResponseWriter, id int) {
 	}
 	svc := InstanceService(id)
 	_ = SystemctlRestart(svc)
+	if inst := s.buildInstance(id); inst != nil && inst.SubscriptionURI != "" {
+		_ = s.refreshLinkedSubscriptionInstance(id, inst.SubscriptionURI)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -639,6 +679,9 @@ func (s *Server) rotateClientID(w http.ResponseWriter, id int) {
 	}
 	svc := InstanceService(id)
 	_ = SystemctlRestart(svc)
+	if inst := s.buildInstance(id); inst != nil && inst.SubscriptionURI != "" {
+		_ = s.refreshLinkedSubscriptionInstance(id, inst.SubscriptionURI)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "client_id": newID})
 }
 
@@ -729,6 +772,10 @@ func (s *Server) buildInstance(id int) Instance {
 	authToken := strings.TrimSpace(vals["OLCRTC_AUTH_TOKEN"])
 	authExpiresAt, _ := parseJWTExpiry(authToken)
 	openfluxKey := strings.TrimSpace(vals["OLCRTC_OPENFLUX_KEY"])
+	openfluxCodec := strings.TrimSpace(vals["OLCRTC_OPENFLUX_CODEC"])
+	if openfluxCodec == "" {
+		openfluxCodec = "batched"
+	}
 
 	label := "Доп. #" + strconv.Itoa(id)
 	if id == 0 {
@@ -756,6 +803,7 @@ func (s *Server) buildInstance(id int) Instance {
 		AuthTokenExpired:        authExpiresAt > 0 && time.Now().Unix() >= authExpiresAt,
 		HasOpenFluxKey:          openfluxKey != "",
 		OpenFluxKey:             openfluxKey,
+		OpenFluxCodec:           openfluxCodec,
 		Name:                    name,
 		Status:                  status,
 		Uptime:                  uptime,
@@ -802,7 +850,15 @@ func (s *Server) buildCompactURIWith(vals map[string]string, clientID string) st
 	key := vals["OLCRTC_KEY"]
 	name := vals["OLCRTC_NAME"]
 	if name == "" {
-		name = fmt.Sprintf("%s_olcrtc", carrier)
+		if carrier == "openflux" {
+			if transport == "mailru" || strings.Contains(room, "mail.ru") {
+				name = "OpenFlux Mail.ru"
+			} else {
+				name = "OpenFlux Yandex"
+			}
+		} else {
+			name = fmt.Sprintf("%s_olcrtc", carrier)
+		}
 	}
 	transport := vals["OLCRTC_TRANSPORT"]
 
@@ -820,6 +876,9 @@ func (s *Server) buildCompactURIWith(vals map[string]string, clientID string) st
 		}
 		if encKey := strings.TrimSpace(vals["OLCRTC_OPENFLUX_KEY"]); encKey != "" {
 			uri += "&k=" + url.QueryEscape(encKey)
+		}
+		if codec := strings.TrimSpace(vals["OLCRTC_OPENFLUX_CODEC"]); codec != "" && codec != "batched" {
+			uri += "&c=" + url.QueryEscape(codec)
 		}
 		uri += "#" + url.QueryEscape(name)
 		return uri
@@ -862,7 +921,15 @@ func (s *Server) buildURIWith(vals map[string]string, clientID string) string {
 	key := vals["OLCRTC_KEY"]
 	name := vals["OLCRTC_NAME"]
 	if name == "" {
-		name = fmt.Sprintf("%s_olcrtc", carrier)
+		if carrier == "openflux" {
+			if transport == "mailru" || strings.Contains(room, "mail.ru") {
+				name = "OpenFlux Mail.ru"
+			} else {
+				name = "OpenFlux Yandex"
+			}
+		} else {
+			name = fmt.Sprintf("%s_olcrtc", carrier)
+		}
 	}
 	transport := vals["OLCRTC_TRANSPORT"]
 
@@ -880,6 +947,9 @@ func (s *Server) buildURIWith(vals map[string]string, clientID string) string {
 		}
 		if encKey := strings.TrimSpace(vals["OLCRTC_OPENFLUX_KEY"]); encKey != "" {
 			uri += "&k=" + url.QueryEscape(encKey)
+		}
+		if codec := strings.TrimSpace(vals["OLCRTC_OPENFLUX_CODEC"]); codec != "" && codec != "batched" {
+			uri += "&c=" + url.QueryEscape(codec)
 		}
 		uri += "#" + url.QueryEscape(name)
 		return uri
