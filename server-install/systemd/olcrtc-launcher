@@ -132,7 +132,7 @@ if [ "$carrier" = "openflux" ]; then
             t="yandex"
         fi
     fi
-    mode_flag="--mode ${OLCRTC_OPENFLUX_MODE:-l4}"
+    mode_flag="--mode ${OLCRTC_OPENFLUX_MODE:-l3}"
     debug_flag=""
     if [ -n "${OLCRTC_DEBUG:-}" ] && [ "$OLCRTC_DEBUG" != "0" ] && [ "$OLCRTC_DEBUG" != "false" ]; then
         debug_flag="--debug"

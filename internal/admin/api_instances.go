@@ -335,6 +335,7 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 		}
 		vals["OLCRTC_OPENFLUX_CODEC"] = codec
 		vals["OLCRTC_CODEC"] = codec
+		vals["OLCRTC_OPENFLUX_MODE"] = "l3"
 	}
 	vals["OLCRTC_JITSI_BRIDGE_MODE"] = jitsiBridgeMode
 	if jitsiSCTPMaxMessageSize != "" {
