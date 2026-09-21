@@ -464,7 +464,7 @@ func (s *Server) updateInstanceConfig(w http.ResponseWriter, r *http.Request, id
 	_ = SystemctlRestart(svc)
 
 	inst := s.buildInstance(id)
-	if inst != nil && inst.SubscriptionURI != "" {
+	if inst.SubscriptionURI != "" {
 		_ = s.refreshLinkedSubscriptionInstance(id, inst.SubscriptionURI)
 	}
 
@@ -633,7 +633,7 @@ func (s *Server) rotateKey(w http.ResponseWriter, id int) {
 	}
 	svc := InstanceService(id)
 	_ = SystemctlRestart(svc)
-	if inst := s.buildInstance(id); inst != nil && inst.SubscriptionURI != "" {
+	if inst := s.buildInstance(id); inst.SubscriptionURI != "" {
 		_ = s.refreshLinkedSubscriptionInstance(id, inst.SubscriptionURI)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "key": keyHex})
@@ -661,7 +661,7 @@ func (s *Server) rotateRoom(w http.ResponseWriter, id int) {
 	}
 	svc := InstanceService(id)
 	_ = SystemctlRestart(svc)
-	if inst := s.buildInstance(id); inst != nil && inst.SubscriptionURI != "" {
+	if inst := s.buildInstance(id); inst.SubscriptionURI != "" {
 		_ = s.refreshLinkedSubscriptionInstance(id, inst.SubscriptionURI)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -679,7 +679,7 @@ func (s *Server) rotateClientID(w http.ResponseWriter, id int) {
 	}
 	svc := InstanceService(id)
 	_ = SystemctlRestart(svc)
-	if inst := s.buildInstance(id); inst != nil && inst.SubscriptionURI != "" {
+	if inst := s.buildInstance(id); inst.SubscriptionURI != "" {
 		_ = s.refreshLinkedSubscriptionInstance(id, inst.SubscriptionURI)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "client_id": newID})
@@ -848,6 +848,7 @@ func (s *Server) buildCompactURIWith(vals map[string]string, clientID string) st
 	}
 	room := vals["OLCRTC_ROOM_ID"]
 	key := vals["OLCRTC_KEY"]
+	transport := vals["OLCRTC_TRANSPORT"]
 	name := vals["OLCRTC_NAME"]
 	if name == "" {
 		if carrier == "openflux" {
@@ -860,7 +861,6 @@ func (s *Server) buildCompactURIWith(vals map[string]string, clientID string) st
 			name = fmt.Sprintf("%s_olcrtc", carrier)
 		}
 	}
-	transport := vals["OLCRTC_TRANSPORT"]
 
 	if carrier == "openflux" {
 		host := "yandex"
@@ -919,6 +919,7 @@ func (s *Server) buildURIWith(vals map[string]string, clientID string) string {
 	}
 	room := vals["OLCRTC_ROOM_ID"]
 	key := vals["OLCRTC_KEY"]
+	transport := vals["OLCRTC_TRANSPORT"]
 	name := vals["OLCRTC_NAME"]
 	if name == "" {
 		if carrier == "openflux" {
@@ -931,7 +932,6 @@ func (s *Server) buildURIWith(vals map[string]string, clientID string) string {
 			name = fmt.Sprintf("%s_olcrtc", carrier)
 		}
 	}
-	transport := vals["OLCRTC_TRANSPORT"]
 
 	if carrier == "openflux" {
 		host := "yandex"
