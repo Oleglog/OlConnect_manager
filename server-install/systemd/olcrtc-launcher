@@ -161,6 +161,9 @@ if [ "$carrier" = "openflux" ]; then
     if [ -n "${OLCRTC_WARP_PROXY:-}" ]; then
         proxy_flags="$proxy_flags --warp-proxy ${OLCRTC_WARP_PROXY}"
     fi
+    if [ -z "${OLCRTC_SOCKS_PROXY:-}" ] && (echo > /dev/tcp/127.0.0.1/40000) 2>/dev/null; then
+        OLCRTC_SOCKS_PROXY="127.0.0.1:40000"
+    fi
     if [ -n "${OLCRTC_SOCKS_PROXY:-}" ]; then
         proxy_flags="$proxy_flags --socks-proxy ${OLCRTC_SOCKS_PROXY}"
         p_url="${OLCRTC_SOCKS_PROXY}"
@@ -183,7 +186,11 @@ if [ "$carrier" = "openflux" ]; then
     elif [ -f "/etc/olcrtc/cookies.txt" ]; then
         cookie_flags="--cookies /etc/olcrtc/cookies.txt"
     fi
-    exec "$OPENFLUX_BIN" --exit-node --url "${OLCRTC_ROOM_ID}" --transport "$t" $mode_flag $local_ip_flag $codec_flag $key_flag $proxy_flags $cookie_flags $debug_flag
+    url_flag=""
+    if [ -n "${OLCRTC_ROOM_ID:-}" ] && [ "${OLCRTC_ROOM_ID}" != "auto" ]; then
+        url_flag="--url ${OLCRTC_ROOM_ID}"
+    fi
+    exec "$OPENFLUX_BIN" --exit-node $url_flag --transport "$t" $mode_flag $local_ip_flag $codec_flag $key_flag $proxy_flags $cookie_flags $debug_flag
 fi
 
 if [ -z "$carrier" ] || [ -z "${OLCRTC_ROOM_ID:-}" ] || [ -z "${OLCRTC_KEY:-}" ]; then
