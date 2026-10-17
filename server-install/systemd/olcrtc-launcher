@@ -142,10 +142,7 @@ if [ "$carrier" = "openflux" ]; then
             t="yandex"
         fi
     fi
-    if { [ "$t" = "vyandex" ] || [ "$t" = "volga" ]; } && [[ "${OLCRTC_ROOM_ID}" != *"/edit/d/"* ]]; then
-        echo "WARNING: vyandex (Volga) requires a /edit/d/ document link, but got ${OLCRTC_ROOM_ID}. Falling back to classic yandex transport." >&2
-        t="yandex"
-    elif [ "$t" = "yandex" ] && [[ "${OLCRTC_ROOM_ID}" == *"/edit/d/"* ]]; then
+    if [ "$t" = "yandex" ] && [[ "${OLCRTC_ROOM_ID}" == *"/edit/d/"* ]]; then
         echo "NOTE: Detected /edit/d/ Volga document link, switching transport to vyandex." >&2
         t="vyandex"
     fi
