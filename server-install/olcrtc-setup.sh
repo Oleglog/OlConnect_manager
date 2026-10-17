@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO="Oleglog/OlConnect_manager"
 # Fallback release used only when the latest tag cannot be resolved from GitHub.
-INSTALLER_VERSION="2.3.9"
+INSTALLER_VERSION="2.4.0"
 RELEASE_TAG=""
 RELEASE_VERSION=""
 CARRIER_DEFAULT="jitsi"
@@ -646,6 +646,10 @@ if [ "$carrier" = "openflux" ]; then
     cookie_flags=""
     if [ -n "${OLCRTC_COOKIES_FILE:-${OLCRTC_COOKIES:-}}" ]; then
         cookie_flags="--cookies ${OLCRTC_COOKIES_FILE:-${OLCRTC_COOKIES}}"
+    elif [ "$t" = "mailru" ] && [ -f "/etc/olcrtc/cookies-mailru.txt" ]; then
+        cookie_flags="--cookies /etc/olcrtc/cookies-mailru.txt"
+    elif { [ "$t" = "vyandex" ] || [ "$t" = "yandex" ] || [ "$t" = "volga" ]; } && [ -f "/etc/olcrtc/cookies-yandex.txt" ]; then
+        cookie_flags="--cookies /etc/olcrtc/cookies-yandex.txt"
     elif [ -f "/etc/olcrtc/cookies.txt" ]; then
         cookie_flags="--cookies /etc/olcrtc/cookies.txt"
     fi
