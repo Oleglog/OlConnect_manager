@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO="Oleglog/OlConnect_manager"
 # Fallback release used only when the latest tag cannot be resolved from GitHub.
-INSTALLER_VERSION="2.3.6"
+INSTALLER_VERSION="2.3.7"
 RELEASE_TAG=""
 RELEASE_VERSION=""
 CARRIER_DEFAULT="jitsi"
@@ -632,7 +632,13 @@ if [ "$carrier" = "openflux" ]; then
         export https_proxy="$p_url"
         echo "Using SOCKS proxy for OpenFlux signaling: $p_url"
     fi
-    exec "$OPENFLUX_BIN" --exit-node --url "${OLCRTC_ROOM_ID}" --transport "$t" $mode_flag $local_ip_flag $codec_flag $key_flag $proxy_flags $debug_flag
+    cookie_flags=""
+    if [ -n "${OLCRTC_COOKIES_FILE:-${OLCRTC_COOKIES:-}}" ]; then
+        cookie_flags="--cookies ${OLCRTC_COOKIES_FILE:-${OLCRTC_COOKIES}}"
+    elif [ -f "/etc/olcrtc/cookies.txt" ]; then
+        cookie_flags="--cookies /etc/olcrtc/cookies.txt"
+    fi
+    exec "$OPENFLUX_BIN" --exit-node --url "${OLCRTC_ROOM_ID}" --transport "$t" $mode_flag $local_ip_flag $codec_flag $key_flag $proxy_flags $cookie_flags $debug_flag
 fi
 
 if [ -z "$carrier" ] || [ -z "${OLCRTC_ROOM_ID:-}" ] || [ -z "${OLCRTC_KEY:-}" ]; then
