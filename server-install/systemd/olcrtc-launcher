@@ -134,6 +134,10 @@ if [ "$carrier" = "openflux" ]; then
             t="cups"
         elif [[ "${OLCRTC_ROOM_ID}" == *"telemost.yandex.ru"* ]]; then
             t="telemost"
+        elif [[ "${OLCRTC_ROOM_ID}" == *"bitrix24"* ]]; then
+            t="bitrix24"
+        elif [[ "${OLCRTC_ROOM_ID}" == *"/edit/d/"* ]]; then
+            t="vyandex"
         else
             t="yandex"
         fi

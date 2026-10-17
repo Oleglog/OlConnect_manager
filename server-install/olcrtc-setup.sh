@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO="Oleglog/OlConnect_manager"
 # Fallback release used only when the latest tag cannot be resolved from GitHub.
-INSTALLER_VERSION="2.3.7"
+INSTALLER_VERSION="2.3.8"
 RELEASE_TAG=""
 RELEASE_VERSION=""
 CARRIER_DEFAULT="jitsi"
@@ -601,6 +601,10 @@ if [ "$carrier" = "openflux" ]; then
             t="cups"
         elif [[ "${OLCRTC_ROOM_ID}" == *"telemost.yandex.ru"* ]]; then
             t="telemost"
+        elif [[ "${OLCRTC_ROOM_ID}" == *"bitrix24"* ]]; then
+            t="bitrix24"
+        elif [[ "${OLCRTC_ROOM_ID}" == *"/edit/d/"* ]]; then
+            t="vyandex"
         else
             t="yandex"
         fi
