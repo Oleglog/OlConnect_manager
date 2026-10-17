@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO="Oleglog/OlConnect_manager"
 # Fallback release used only when the latest tag cannot be resolved from GitHub.
-INSTALLER_VERSION="2.3.8"
+INSTALLER_VERSION="2.3.9"
 RELEASE_TAG=""
 RELEASE_VERSION=""
 CARRIER_DEFAULT="jitsi"
@@ -591,7 +591,7 @@ if [ "$carrier" = "openflux" ]; then
             exit 1
         fi
     fi
-    t="${OLCRTC_TRANSPORT:-yandex}"
+    t="${OLCRTC_TRANSPORT:-auto}"
     if [ "$t" = "auto" ] || [ -z "$t" ]; then
         if [[ "${OLCRTC_ROOM_ID}" == *"mail.ru"* ]]; then
             t="mailru"
@@ -608,6 +608,13 @@ if [ "$carrier" = "openflux" ]; then
         else
             t="yandex"
         fi
+    fi
+    if { [ "$t" = "vyandex" ] || [ "$t" = "volga" ]; } && [[ "${OLCRTC_ROOM_ID}" != *"/edit/d/"* ]]; then
+        echo "WARNING: vyandex (Volga) requires a /edit/d/ document link, but got ${OLCRTC_ROOM_ID}. Falling back to classic yandex transport." >&2
+        t="yandex"
+    elif [ "$t" = "yandex" ] && [[ "${OLCRTC_ROOM_ID}" == *"/edit/d/"* ]]; then
+        echo "NOTE: Detected /edit/d/ Volga document link, switching transport to vyandex." >&2
+        t="vyandex"
     fi
     mode_flag="--mode ${OLCRTC_OPENFLUX_MODE:-l3}"
     debug_flag=""
