@@ -183,6 +183,39 @@ function fmtStatusPill(st) {
   return { cls: 'status-pill-inactive', label: st || 'inactive' };
 }
 
+// Human-readable transport label + room-setup hint for instance cards.
+// inst.transport is the raw OLCRTC_TRANSPORT value; inst.room_id is the doc URL.
+function fmtTransportInfo(inst) {
+  const t = (inst.transport || '').toLowerCase();
+  const room = inst.room_id || '';
+  if (inst.carrier !== 'openflux') {
+    if (t === 'vp8channel') return { label: 'VP8-канал', hint: 'Legacy-видеоканал (WBStream/Телемост). Совместим только с таким же VP8-профилем на клиенте.' };
+    if (t === 'datachannel') return { label: 'Data-канал', hint: 'Jitsi data-канал.' };
+    return { label: inst.transport || '-', hint: '' };
+  }
+  switch (t) {
+    case 'mailru':
+      return { label: '📮 Mail.ru Документы', hint: 'Документ: ' + (room || '—') + '. Нужны куки cloud.mail.ru (файл /etc/olcrtc/cookies.txt на сервере + поле «Куки» в профиле клиента).' };
+    case 'vyandex':
+      return { label: '🟡 Волга (Яндекс)', hint: 'Документ /edit/d/: ' + (room || '—') + '. Нужны куки yandex.ru. Без кук — капча-цикл.' };
+    case 'yandex':
+      return { label: '🟡 Яндекс (классика)', hint: 'Документ disk.yandex.ru: ' + (room || '—') + '. Нужны куки yandex.ru.' };
+    case 'telemost':
+      return { label: '📹 Телемост (OpenFlux)', hint: 'Встреча: ' + (room || '—') + '. Создайте встречу на telemost.yandex.ru и вставьте ссылку. Несовместим с legacy VP8-профилем!' };
+    case 'cups':
+    case 'cupsonline':
+      return { label: '🧪 CUPS (live-coding)', hint: 'Румы создаются автоматически при старте ноды, вручную ничего создавать не надо. Строка для клиента — из QR/URI инстанса.' };
+    case 'bitrix24':
+      return { label: '🏢 Битрикс24', hint: 'Портал: ' + (room || '—') + '. Нужны куки портала + sessid + chat ID.' };
+    case 'avito':
+      return { label: '🟢 Авито (code.avito.ru)', hint: 'Звонок создаётся сам: залогиньтесь на code.avito.ru, скопируйте куки в поле «Куки» профиля — POST /web/1/code/room выполнит транспорт.' };
+    case 'auto':
+      return { label: '✨ Авто', hint: 'Транспорт определится по ссылке документа.' };
+    default:
+      return { label: inst.transport || '-', hint: room };
+  }
+}
+
 
 
 // ── Toast ────────────────────────────────────────────────────────────────────
@@ -815,7 +848,12 @@ function renderInstanceCard(inst, context = {}) {
   const carrierBadge = el('span', 'badge badge-blue');
   carrierBadge.innerHTML = icon('tag', 12) + '<span>' + (inst.carrier || '-') + '</span>';
   const transportBadge = el('span', 'badge');
-  transportBadge.innerHTML = icon('wifi', 12) + '<span>' + (inst.transport || '-') + '</span>';
+  // Human-readable transport names + room-setup hints: raw values like
+  // "vyandex"/"cupsonline" mean nothing at a glance. Mirrors
+  // ProfileEditorDialog.kt labels on the Android client.
+  const transportInfo = fmtTransportInfo(inst);
+  transportBadge.innerHTML = icon('wifi', 12) + '<span>' + transportInfo.label + '</span>';
+  if (transportInfo.hint) transportBadge.title = transportInfo.hint;
   badges.appendChild(usageBadge);
   badges.appendChild(carrierBadge);
   badges.appendChild(transportBadge);
