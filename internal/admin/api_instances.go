@@ -303,7 +303,7 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "wbstream requires a Room ID", http.StatusBadRequest)
 		return
 	}
-	if carrier == "openflux" && (roomID == "" || (!strings.HasPrefix(roomID, "http://") && !strings.HasPrefix(roomID, "https://"))) {
+	if carrier == "openflux" && (roomID == "" || (!strings.HasPrefix(roomID, "http://") && !strings.HasPrefix(roomID, "https://"))) && !((transport == "cups" || transport == "cupsonline" || transport == "avito") && (roomID == "" || roomID == "auto")) {
 		http.Error(w, "openflux requires a valid Document URL (https://...)", http.StatusBadRequest)
 		return
 	}
@@ -454,7 +454,7 @@ func (s *Server) updateInstanceConfig(w http.ResponseWriter, r *http.Request, id
 		http.Error(w, "wbstream requires a Room ID — WB Stream no longer auto-creates rooms; create one at https://stream.wb.ru and paste it into Room ID", http.StatusBadRequest)
 		return
 	}
-	if carrier == "openflux" && (room == "" || (!strings.HasPrefix(room, "http://") && !strings.HasPrefix(room, "https://"))) {
+	if carrier == "openflux" && (room == "" || (!strings.HasPrefix(room, "http://") && !strings.HasPrefix(room, "https://"))) && !((transport == "cups" || transport == "cupsonline" || transport == "avito") && (room == "" || room == "auto")) {
 		http.Error(w, "openflux requires a valid Document URL (https://...)", http.StatusBadRequest)
 		return
 	}

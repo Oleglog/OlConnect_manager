@@ -77,7 +77,7 @@ function toggleTheme() {
 function compatibleTransports(carrier) {
   if (carrier === 'telemost' || carrier === 'wbstream') return ['vp8channel'];
   if (carrier === 'jitsi') return ['datachannel'];
-  if (carrier === 'openflux') return ['auto', 'vyandex', 'yandex', 'mailru', 'avito', 'cups', 'telemost'];
+  if (carrier === 'openflux') return ['auto', 'vyandex', 'yandex', 'mailru', 'avito', 'cups', 'telemost', 'bitrix24'];
   return ['vp8channel', 'datachannel'];
 }
 
@@ -2585,11 +2585,13 @@ function showCreateInstanceModal() {
   createBtn.onclick = async () => {
     const carrier = carrierField.input.value;
     const room = roomIDField.input.value.trim();
+    const t = transportField.input.value;
     if (carrier === 'wbstream' && !room) {
       showToast('Для wbstream нужно указать Room ID', 'error');
       return;
     }
-    if (carrier === 'openflux' && (!room || (!room.startsWith('http://') && !room.startsWith('https://')))) {
+    const autoOk = (t === 'cups' || t === 'cupsonline' || t === 'avito') && (!room || room === 'auto');
+    if (carrier === 'openflux' && !autoOk && (!room || (!room.startsWith('http://') && !room.startsWith('https://')))) {
       showToast('Для OpenFlux укажите полную ссылку на документ (https://...)', 'error');
       return;
     }
@@ -2994,11 +2996,13 @@ function showConfigModal(inst) {
   saveBtn.onclick = async () => {
     const carrier = carrierField.input.value;
     const room = roomIDField.input.value.trim();
+    const t = transportField.input.value;
     if (carrier === 'wbstream' && !room) {
       showToast('Для wbstream нужно указать Room ID', 'error');
       return;
     }
-    if (carrier === 'openflux' && (!room || (!room.startsWith('http://') && !room.startsWith('https://')))) {
+    const autoOk = (t === 'cups' || t === 'cupsonline' || t === 'avito') && (!room || room === 'auto');
+    if (carrier === 'openflux' && !autoOk && (!room || (!room.startsWith('http://') && !room.startsWith('https://')))) {
       showToast('Для OpenFlux укажите полную ссылку на документ (https://...)', 'error');
       return;
     }
