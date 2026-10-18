@@ -51,11 +51,11 @@ func GetConnectionInfo(ctx context.Context, roomURL, displayName string) (*Conne
 	q.Add("waiting_room_supported", "true")
 	req.URL.RawQuery = q.Encode()
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:149.0) Gecko/20100101 Firefox/149.0")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0")
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Client-Instance-Id", uuid.New().String())
-	req.Header.Set("X-Telemost-Client-Version", "187.1.0")
+	req.Header.Set("X-Telemost-Client-Version", "211.2.0")
 	req.Header.Set("Idempotency-Key", uuid.New().String())
 	req.Header.Set("Origin", "https://telemost.yandex.ru")
 	req.Header.Set("Referer", "https://telemost.yandex.ru/")
