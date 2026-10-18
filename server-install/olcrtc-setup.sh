@@ -653,6 +653,11 @@ if [ "$carrier" = "openflux" ]; then
     elif [ -f "/etc/olcrtc/cookies.txt" ]; then
         cookie_flags="--cookies /etc/olcrtc/cookies.txt"
     fi
+    # ponytail: B24 auth rides on env (node reads B24_COOKIES/B24_SESSID/B24_CHAT_ID);
+    # OLCRTC_* aliases let the manager pass them through the instance env file.
+    [ -n "${OLCRTC_B24_COOKIES:-}" ] && export B24_COOKIES="${OLCRTC_B24_COOKIES}"
+    [ -n "${OLCRTC_B24_SESSID:-}" ] && export B24_SESSID="${OLCRTC_B24_SESSID}"
+    [ -n "${OLCRTC_B24_CHAT_ID:-}" ] && export B24_CHAT_ID="${OLCRTC_B24_CHAT_ID}"
     exec "$OPENFLUX_BIN" --exit-node --url "${OLCRTC_ROOM_ID}" --transport "$t" $mode_flag $local_ip_flag $codec_flag $key_flag $proxy_flags $cookie_flags $debug_flag
 fi
 

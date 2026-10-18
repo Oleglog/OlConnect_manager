@@ -39,6 +39,9 @@ type Instance struct {
 	HasOpenFluxKey          bool   `json:"has_openflux_key"`
 	OpenFluxKey             string `json:"openflux_key,omitempty"`
 	OpenFluxCodec           string `json:"openflux_codec,omitempty"`
+	HasB24Cookies           bool   `json:"has_b24_cookies"`
+	B24Sessid               string `json:"b24_sessid,omitempty"`
+	B24ChatID               string `json:"b24_chat_id,omitempty"`
 	Name                    string `json:"name"`
 	Status                  string `json:"status"`
 	Uptime                  string `json:"uptime"`
@@ -222,6 +225,9 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 	authToken := ""
 	openfluxKey := ""
 	openfluxCodec := "batched"
+	b24cookies := ""
+	b24sessid := ""
+	b24chatID := ""
 	if r.Body != nil {
 		var req struct {
 			Carrier                 string `json:"carrier"`
@@ -231,6 +237,9 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 			AuthToken               string `json:"auth_token"`
 			OpenFluxKey             string `json:"openflux_key"`
 			OpenFluxCodec           string `json:"openflux_codec"`
+			B24Cookies              string `json:"b24_cookies"`
+			B24Sessid               string `json:"b24_sessid"`
+			B24ChatID               string `json:"b24_chat_id"`
 			VP8FPS                  any    `json:"vp8_fps"`
 			VP8Batch                any    `json:"vp8_batch"`
 			DNS                     string `json:"dns"`
@@ -255,6 +264,9 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 			roomID = req.RoomID
 			authToken = strings.TrimSpace(req.AuthToken)
 			openfluxKey = strings.TrimSpace(req.OpenFluxKey)
+			b24cookies = strings.TrimSpace(req.B24Cookies)
+			b24sessid = strings.TrimSpace(req.B24Sessid)
+			b24chatID = strings.TrimSpace(req.B24ChatID)
 			if strings.TrimSpace(req.OpenFluxCodec) != "" {
 				openfluxCodec = strings.TrimSpace(strings.ToLower(req.OpenFluxCodec))
 			}
@@ -334,6 +346,15 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 	if carrier == "openflux" {
 		if openfluxKey != "" {
 			vals["OLCRTC_OPENFLUX_KEY"] = openfluxKey
+		}
+		if b24cookies != "" {
+			vals["OLCRTC_B24_COOKIES"] = b24cookies
+		}
+		if b24sessid != "" {
+			vals["OLCRTC_B24_SESSID"] = b24sessid
+		}
+		if b24chatID != "" {
+			vals["OLCRTC_B24_CHAT_ID"] = b24chatID
 		}
 		codec := "batched"
 		if openfluxCodec != "" {
@@ -556,6 +577,16 @@ func buildInstanceConfigUpdates(req map[string]any) map[string]string {
 		} else {
 			updates["OLCRTC_DEBUG"] = ""
 		}
+	}
+	// ponytail: B24 auth via instance env; empty string clears.
+	if v, ok := req["b24_cookies"].(string); ok {
+		updates["OLCRTC_B24_COOKIES"] = strings.TrimSpace(v)
+	}
+	if v, ok := req["b24_sessid"].(string); ok {
+		updates["OLCRTC_B24_SESSID"] = strings.TrimSpace(v)
+	}
+	if v, ok := req["b24_chat_id"].(string); ok {
+		updates["OLCRTC_B24_CHAT_ID"] = strings.TrimSpace(v)
 	}
 	addInstanceTuningUpdates(req, updates)
 	return updates
@@ -817,6 +848,9 @@ func (s *Server) buildInstance(id int) Instance {
 		HasOpenFluxKey:          openfluxKey != "",
 		OpenFluxKey:             openfluxKey,
 		OpenFluxCodec:           openfluxCodec,
+		HasB24Cookies:           strings.TrimSpace(vals["OLCRTC_B24_COOKIES"]) != "",
+		B24Sessid:               vals["OLCRTC_B24_SESSID"],
+		B24ChatID:               vals["OLCRTC_B24_CHAT_ID"],
 		Name:                    name,
 		Status:                  status,
 		Uptime:                  uptime,

@@ -2410,6 +2410,18 @@ function showCreateInstanceModal() {
     { value: 'legacy', label: 'Legacy (LZ4 per-packet)' },
   ]);
   openfluxKeySec.appendChild(openfluxCodecField.field);
+  // ponytail: B24 auth only, visible for bitrix24 transport.
+  const b24Block = el('div', 'mt-3 hidden');
+  b24Block.innerHTML = '<div class="text-xs text-gray-400 mb-2">Битрикс24 (портал, куки + sessid + chat)</div>';
+  const b24Grid = el('div', 'grid grid-cols-1 gap-2');
+  const b24CookiesField = makeInputField('B24 куки', icon('lock', 14), '', { placeholder: 'PHPSESSID=...; BITRIX_SM_...=...' });
+  const b24SessidField = makeInputField('B24 sessid', icon('key', 14), '', { placeholder: 'sessid из портала' });
+  const b24ChatField = makeInputField('B24 chat ID', icon('hash', 14), '', { placeholder: 'пусто = создать новый, chat123 = переиспользовать' });
+  b24Grid.appendChild(b24CookiesField.field);
+  b24Grid.appendChild(b24SessidField.field);
+  b24Grid.appendChild(b24ChatField.field);
+  b24Block.appendChild(b24Grid);
+  openfluxKeySec.appendChild(b24Block);
   connectionSec.appendChild(openfluxKeySec);
 
   const dcWarn = el('div', 'p-2 mb-3 text-xs rounded border border-red-500/50 bg-red-500/10 text-red-200 hidden');
@@ -2544,6 +2556,7 @@ function showCreateInstanceModal() {
     wbAcquireBtn.classList.toggle('hidden', c !== 'wbstream');
     jitsiPresets.classList.toggle('hidden', c !== 'jitsi');
     openfluxKeySec.classList.toggle('hidden', c !== 'openflux');
+    b24Block.classList.toggle('hidden', !(c === 'openflux' && finalTransport === 'bitrix24'));
 
     if (c === 'openflux') {
       const lbl = roomIDField.field.querySelector('label');
@@ -2629,6 +2642,11 @@ function showCreateInstanceModal() {
         body.openflux_key = openfluxKeyInput.value.trim();
       }
       body.openflux_codec = openfluxCodecField.input.value;
+      if (t === 'bitrix24') {
+        if (b24CookiesField.input.value.trim()) body.b24_cookies = b24CookiesField.input.value.trim();
+        if (b24SessidField.input.value.trim()) body.b24_sessid = b24SessidField.input.value.trim();
+        if (b24ChatField.input.value.trim()) body.b24_chat_id = b24ChatField.input.value.trim();
+      }
     }
     await withLoading(createBtn, async () => {
       try {
@@ -2783,6 +2801,18 @@ function showConfigModal(inst) {
     { value: 'legacy', label: 'Legacy (LZ4 per-packet)' },
   ]);
   openfluxKeySec.appendChild(openfluxCodecField.field);
+  // ponytail: B24 auth only, visible for bitrix24 transport.
+  const b24Block = el('div', 'mt-3 hidden');
+  b24Block.innerHTML = '<div class="text-xs text-gray-400 mb-2">Битрикс24 (портал, куки + sessid + chat)</div>';
+  const b24Grid = el('div', 'grid grid-cols-1 gap-2');
+  const b24CookiesField = makeInputField('B24 куки', icon('lock', 14), '', { placeholder: inst.has_b24_cookies ? 'куки заданы (введите новые чтобы заменить)' : 'PHPSESSID=...; BITRIX_SM_...=...' });
+  const b24SessidField = makeInputField('B24 sessid', icon('key', 14), inst.b24_sessid || '', { placeholder: 'sessid из портала' });
+  const b24ChatField = makeInputField('B24 chat ID', icon('hash', 14), inst.b24_chat_id || '', { placeholder: 'пусто = создать новый, chat123 = переиспользовать' });
+  b24Grid.appendChild(b24CookiesField.field);
+  b24Grid.appendChild(b24SessidField.field);
+  b24Grid.appendChild(b24ChatField.field);
+  b24Block.appendChild(b24Grid);
+  openfluxKeySec.appendChild(b24Block);
   connectionSec.appendChild(openfluxKeySec);
   div.appendChild(connectionSec);
 
@@ -2981,6 +3011,7 @@ function showConfigModal(inst) {
     wbHint.classList.toggle('hidden', c !== 'wbstream');
     jitsiPresets.classList.toggle('hidden', c !== 'jitsi');
     openfluxKeySec.classList.toggle('hidden', c !== 'openflux');
+    b24Block.classList.toggle('hidden', !(c === 'openflux' && t === 'bitrix24'));
     keyRotateBtn.style.display = (c === 'openflux') ? 'none' : '';
     roomRotateBtn.disabled = (c === 'wbstream' || c === 'openflux');
     roomRotateBtn.title = (c === 'wbstream') ? 'WB Stream отключил автосоздание румы' : (c === 'openflux') ? 'Для OpenFlux используется постоянная ссылка на документ' : '';
@@ -3051,6 +3082,11 @@ function showConfigModal(inst) {
         body.clear_openflux_key = true;
       }
       body.openflux_codec = openfluxCodecField.input.value;
+      if (t === 'bitrix24') {
+        if (b24CookiesField.input.value.trim()) body.b24_cookies = b24CookiesField.input.value.trim();
+        if (b24SessidField.input.value.trim()) body.b24_sessid = b24SessidField.input.value.trim();
+        if (b24ChatField.input.value.trim()) body.b24_chat_id = b24ChatField.input.value.trim();
+      }
     }
     const authToken = authTokenField.input.value.trim();
     if (authToken) {
