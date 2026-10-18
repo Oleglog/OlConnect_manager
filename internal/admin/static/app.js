@@ -2489,6 +2489,17 @@ function showCreateInstanceModal() {
   netSec.appendChild(netGrid);
   div.appendChild(netSec);
 
+  // Debug verbose logging (OLCRTC_DEBUG=1 -> openflux --debug)
+  const debugLabel = el('label', 'inline-flex items-center gap-2 text-sm font-medium mb-3 cursor-pointer');
+  const debugCreateInp = el('input', '');
+  debugCreateInp.type = 'checkbox';
+  debugCreateInp.checked = false;
+  debugCreateInp.style.width = 'auto';
+  debugCreateInp.style.minHeight = 'auto';
+  debugLabel.appendChild(debugCreateInp);
+  debugLabel.appendChild(el('span', '', 'Debug (verbose openflux log)'));
+  div.appendChild(debugLabel);
+
   function getTransportOptionsForCreate(carrier) {
     // Issue #52: only supported combinations are selectable.
     return compatibleTransports(carrier);
@@ -2606,6 +2617,7 @@ function showCreateInstanceModal() {
       dns: dnsField.input.value.trim(),
       socks_proxy: socksField.input.value.trim(),
       warp_proxy: warpField.input.value.trim(),
+      debug: debugCreateInp.checked,
       jitsi_bridge_mode: bridgeModeField.input.value,
       jitsi_sctp_max_message_size: jitsiSCTPMaxMessageField.input.value.trim(),
       traffic_max_payload_size: trafficPayloadField.input.value.trim(),
@@ -2848,6 +2860,16 @@ function showConfigModal(inst) {
   seiBlock.appendChild(seiGrid);
   advBody.appendChild(seiBlock);
 
+  const debugLabel = el('label', 'inline-flex items-center gap-2 text-sm font-medium mt-1 cursor-pointer');
+  const debugEditInp = el('input', '');
+  debugEditInp.type = 'checkbox';
+  debugEditInp.checked = !!inst.debug;
+  debugEditInp.style.width = 'auto';
+  debugEditInp.style.minHeight = 'auto';
+  debugLabel.appendChild(debugEditInp);
+  debugLabel.appendChild(el('span', '', 'Debug (verbose openflux log)'));
+  advBody.appendChild(debugLabel);
+
   advSec.appendChild(advBody);
   let advOpen = true;
   function setAdvOpen(open) {
@@ -3014,7 +3036,7 @@ function showConfigModal(inst) {
       dns: dnsField.input.value,
       socks_proxy: socksField.input.value,
       warp_proxy: warpField.input.value,
-      debug: false,
+      debug: debugEditInp.checked,
       jitsi_bridge_mode: bridgeModeField.input.value,
       jitsi_sctp_max_message_size: jitsiSCTPMaxMessageField.input.value.trim(),
       traffic_max_payload_size: trafficPayloadField.input.value.trim(),
