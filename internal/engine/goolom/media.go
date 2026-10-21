@@ -55,6 +55,7 @@ func (s *Session) handleSdpOffer(offer map[string]any, uid string, sendPub bool)
 	}); err != nil {
 		return fmt.Errorf("set remote desc: %w", err)
 	}
+	s.flushPendingICE(true)
 
 	answer, err := s.pcSub.CreateAnswer(nil)
 	if err != nil {
@@ -118,8 +119,34 @@ func (s *Session) handleSdpAnswer(answer map[string]any, uid string) {
 		SDP:  sdp,
 	}); err != nil {
 		logger.Debugf("SetRemoteDescription error: %v", err)
+	} else {
+		s.flushPendingICE(false)
 	}
 	s.sendAck(uid)
+}
+
+func (s *Session) flushPendingICE(subscriber bool) {
+	s.iceMu.Lock()
+	var list []webrtc.ICECandidateInit
+	if subscriber {
+		list = s.pendingSubICE
+		s.pendingSubICE = nil
+	} else {
+		list = s.pendingPubICE
+		s.pendingPubICE = nil
+	}
+	s.iceMu.Unlock()
+
+	pc := s.pcPub
+	if subscriber {
+		pc = s.pcSub
+	}
+	if pc == nil {
+		return
+	}
+	for _, init := range list {
+		_ = pc.AddICECandidate(init)
+	}
 }
 
 func (s *Session) handleICE(cand map[string]any) {
@@ -138,10 +165,22 @@ func (s *Session) handleICE(cand map[string]any) {
 		SDPMid:        &sdpMid,
 		SDPMLineIndex: func() *uint16 { v := uint16(sdpMLineIndex); return &v }(),
 	}
-	switch target {
+	switch strings.ToUpper(strings.TrimSpace(target)) {
 	case "SUBSCRIBER":
+		if s.pcSub == nil || s.pcSub.RemoteDescription() == nil {
+			s.iceMu.Lock()
+			s.pendingSubICE = append(s.pendingSubICE, init)
+			s.iceMu.Unlock()
+			return
+		}
 		_ = s.pcSub.AddICECandidate(init)
 	case "PUBLISHER":
+		if s.pcPub == nil || s.pcPub.RemoteDescription() == nil {
+			s.iceMu.Lock()
+			s.pendingPubICE = append(s.pendingPubICE, init)
+			s.iceMu.Unlock()
+			return
+		}
 		_ = s.pcPub.AddICECandidate(init)
 	}
 }
@@ -343,13 +382,46 @@ func parseICEServer(rawServer any) (webrtc.ICEServer, bool) {
 	return ice, true
 }
 
-func (s *Session) applyServerHelloConfig(serverHello map[string]any) {
-	rawCfg, ok := serverHello["rtcConfiguration"].(map[string]any)
-	if !ok {
-		return
+func collectRawICEServers(serverHello map[string]any) []any {
+	var out []any
+	if rawCfg, ok := serverHello["rtcConfiguration"].(map[string]any); ok {
+		if rawServers, ok := rawCfg["iceServers"].([]any); ok {
+			out = append(out, rawServers...)
+		}
 	}
-	rawServers, ok := rawCfg["iceServers"].([]any)
-	if !ok || len(rawServers) == 0 {
+	appendPeerCfg := func(m map[string]any) {
+		if m == nil {
+			return
+		}
+		if turn, ok := m["turn"].([]any); ok {
+			out = append(out, turn...)
+		}
+		if stun, ok := m["stun"].([]any); ok {
+			out = append(out, stun...)
+		}
+		if ice, ok := m["iceServers"].([]any); ok {
+			out = append(out, ice...)
+		}
+	}
+	if ms, ok := serverHello["mediaServer"].(map[string]any); ok {
+		appendPeerCfg(ms)
+	}
+	if ps, ok := serverHello["peerServer"].(map[string]any); ok {
+		appendPeerCfg(ps)
+	}
+	if list, ok := serverHello["peerServers"].([]any); ok {
+		for _, item := range list {
+			if m, ok := item.(map[string]any); ok {
+				appendPeerCfg(m)
+			}
+		}
+	}
+	return out
+}
+
+func (s *Session) applyServerHelloConfig(serverHello map[string]any) {
+	rawServers := collectRawICEServers(serverHello)
+	if len(rawServers) == 0 {
 		return
 	}
 	iceServers := make([]webrtc.ICEServer, 0, len(rawServers))

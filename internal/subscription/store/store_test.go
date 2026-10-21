@@ -91,10 +91,10 @@ CREATE TABLE instances (
 	if err != nil {
 		t.Fatal(err)
 	}
-	if alpha[0].RawURI != manualURI {
-		t.Fatalf("manual URI changed to %q", alpha[0].RawURI)
+	if alpha[0].RawURI != ensureCoreParam(manualURI) {
+		t.Fatalf("manual URI changed to %q, want %q", alpha[0].RawURI, ensureCoreParam(manualURI))
 	}
-	if alpha[1].SourceInstanceID == nil || *alpha[1].SourceInstanceID != 0 || alpha[1].RawURI != newMainURI {
+	if alpha[1].SourceInstanceID == nil || *alpha[1].SourceInstanceID != 0 || alpha[1].RawURI != ensureCoreParam(newMainURI) {
 		t.Fatalf("main linked instance was not refreshed: %+v", alpha[1])
 	}
 

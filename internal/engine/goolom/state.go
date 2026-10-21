@@ -167,7 +167,7 @@ func (s *Session) sendTelemetry(ctx context.Context, endpoint, event string) {
 	}
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	req.Header.Set("Client-Instance-Id", uuid.New().String())
-	req.Header.Set("X-Telemost-Client-Version", "187.1.0")
+	req.Header.Set("X-Telemost-Client-Version", "211.2.0")
 	req.Header.Set("Idempotency-Key", uuid.New().String())
 
 	client := protect.NewHTTPClient()

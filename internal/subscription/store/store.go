@@ -302,6 +302,7 @@ func (s *Store) RefreshLinkedInstances(uris map[int]string) ([]string, error) {
 		if sourceID < 0 || (!strings.HasPrefix(rawURI, "olcrtc://") && !strings.HasPrefix(rawURI, "olconnect://") && !strings.HasPrefix(rawURI, "openflux://")) {
 			continue
 		}
+		rawURI = ensureCoreParam(rawURI)
 		rows, err := tx.Query(`SELECT DISTINCT s.slug
 FROM instances i JOIN subscriptions s ON s.id = i.subscription_id
 WHERE i.source_instance_id = ? AND i.raw_uri <> ?`, sourceID, rawURI)

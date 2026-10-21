@@ -98,6 +98,10 @@ type Session struct {
 	pcPub *webrtc.PeerConnection
 	dc    *webrtc.DataChannel
 
+	iceMu         sync.Mutex
+	pendingSubICE []webrtc.ICECandidateInit
+	pendingPubICE []webrtc.ICECandidateInit
+
 	onData          func([]byte)
 	onReconnect     func(*webrtc.DataChannel)
 	shouldReconnect func() bool

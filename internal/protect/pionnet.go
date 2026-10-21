@@ -14,6 +14,7 @@ import (
 	"net"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/pion/transport/v4"
 	"github.com/pion/transport/v4/stdnet"
@@ -23,7 +24,7 @@ import (
 // gathering. Keep pptp explicit; it does not match the ppp prefix.
 //
 //nolint:gochecknoglobals // fixed lookup table; a slice cannot be const
-var tunInterfacePrefixes = []string{"tun", "ppp", "pptp"}
+var tunInterfacePrefixes = []string{"tun", "tap", "ppp", "pptp", "wg", "utun"}
 
 // ErrUnexpectedConnType is returned when a protected listen/dial yields an
 // unexpected concrete type. The caller closes that connection instead of using
@@ -33,30 +34,115 @@ var ErrUnexpectedConnType = errors.New("protect: unexpected connection type")
 // ProtectedNet wraps Pion's standard net.
 type ProtectedNet struct {
 	*stdnet.Net
+	fallback []*transport.Interface
 }
 
 // NewProtectedNet builds a ProtectedNet over Pion's standard net.
+// On Android 11+ (targetSdk >= 30) where SELinux blocks netlink RTM_GETLINK,
+// stdnet.NewNet() may fail or return no usable non-tunnel interfaces; in that
+// case ProtectedNet discovers the outbound IPv4 address via a protected UDP
+// route lookup so Pion ICE can still gather local host and srflx candidates.
 func NewProtectedNet() (*ProtectedNet, error) {
 	base, err := stdnet.NewNet()
-	if err != nil {
-		return nil, fmt.Errorf("stdnet: %w", err)
+	if err != nil || base == nil {
+		base = &stdnet.Net{}
 	}
-	return &ProtectedNet{Net: base}, nil
+	pn := &ProtectedNet{Net: base}
+	pn.ensureUsableInterfaces()
+	return pn, nil
+}
+
+func (n *ProtectedNet) ensureUsableInterfaces() {
+	ifaces, _ := n.Net.Interfaces()
+	for _, ifc := range ifaces {
+		if ifc == nil || isTunInterface(ifc.Name) {
+			continue
+		}
+		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := ifc.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			if ipnet, ok := a.(*net.IPNet); ok && ipnet.IP != nil && ipnet.IP.To4() != nil && !ipnet.IP.IsLoopback() {
+				return
+			}
+		}
+	}
+	if ip4 := discoverLocalIPv4(); ip4 != nil {
+		ifc := transport.NewInterface(net.Interface{
+			Index: 1,
+			MTU:   1500,
+			Name:  "wlan0",
+			Flags: net.FlagUp | net.FlagBroadcast | net.FlagMulticast | net.FlagRunning,
+		})
+		ifc.AddAddress(&net.IPNet{
+			IP:   ip4,
+			Mask: net.CIDRMask(24, 32),
+		})
+		n.fallback = []*transport.Interface{ifc}
+	}
+}
+
+func discoverLocalIPv4() net.IP {
+	d := net.Dialer{Timeout: 2 * time.Second, Control: controlFunc}
+	for _, target := range []string{"77.88.8.8:80", "1.1.1.1:80", "8.8.8.8:80"} {
+		conn, err := d.Dial("udp4", target)
+		if err != nil {
+			continue
+		}
+		laddr, _ := conn.LocalAddr().(*net.UDPAddr)
+		_ = conn.Close()
+		if laddr != nil && laddr.IP != nil && !laddr.IP.IsLoopback() && !laddr.IP.IsUnspecified() {
+			if ip4 := laddr.IP.To4(); ip4 != nil {
+				return ip4
+			}
+		}
+	}
+	return nil
 }
 
 // Interfaces returns system interfaces after filtering tunnel-style devices.
 func (n *ProtectedNet) Interfaces() ([]*transport.Interface, error) {
 	all, err := n.Net.Interfaces()
-	if err != nil {
-		return nil, fmt.Errorf("list interfaces: %w", err)
-	}
-	out := make([]*transport.Interface, 0, len(all))
-	for _, ifc := range all {
-		if !isTunInterface(ifc.Name) {
-			out = append(out, ifc)
+	if err == nil && len(all) > 0 {
+		out := make([]*transport.Interface, 0, len(all))
+		for _, ifc := range all {
+			if ifc != nil && !isTunInterface(ifc.Name) {
+				out = append(out, ifc)
+			}
+		}
+		if len(out) > 0 && len(n.fallback) == 0 {
+			return out, nil
+		}
+		if len(n.fallback) > 0 {
+			return append(out, n.fallback...), nil
 		}
 	}
-	return out, nil
+	if len(n.fallback) > 0 {
+		return n.fallback, nil
+	}
+	n.ensureUsableInterfaces()
+	return n.fallback, nil
+}
+
+// InterfaceByIndex looks up an interface by index, falling back to the
+// synthesized Android interface when netlink enumeration is unavailable.
+func (n *ProtectedNet) InterfaceByIndex(index int) (*transport.Interface, error) {
+	if ifc, err := n.Net.InterfaceByIndex(index); err == nil && ifc != nil {
+		if isTunInterface(ifc.Name) {
+			return nil, transport.ErrInterfaceNotFound
+		}
+		return ifc, nil
+	}
+	for _, ifc := range n.fallback {
+		if ifc.Index == index {
+			return ifc, nil
+		}
+	}
+	return nil, transport.ErrInterfaceNotFound
 }
 
 // InterfaceByName applies the same filtering as Interfaces.
@@ -65,15 +151,29 @@ func (n *ProtectedNet) InterfaceByName(name string) (*transport.Interface, error
 		return nil, transport.ErrInterfaceNotFound
 	}
 	ifc, err := n.Net.InterfaceByName(name)
+	if err == nil && ifc != nil {
+		return ifc, nil
+	}
+	for _, f := range n.fallback {
+		if f.Name == name {
+			return f, nil
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("lookup interface %q: %w", name, err)
 	}
-	return ifc, nil
+	return nil, transport.ErrInterfaceNotFound
+}
+
+// IsTunnelInterface reports whether name is a tunnel-style network interface.
+func IsTunnelInterface(name string) bool {
+	return isTunInterface(name)
 }
 
 func isTunInterface(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
 	for _, p := range tunInterfacePrefixes {
-		if strings.HasPrefix(name, p) {
+		if strings.HasPrefix(lower, p) {
 			return true
 		}
 	}

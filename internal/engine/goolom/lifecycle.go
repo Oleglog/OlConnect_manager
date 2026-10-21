@@ -20,7 +20,10 @@ import (
 // defaultSTUNURL is the bootstrap STUN server used before the SFU advertises
 // its own ICE servers via serverHello. Yandex Telemost hands back the real
 // STUN/TURN set in rtcConfiguration.
-const defaultSTUNURL = "stun:stun.rtc.yandex.net:3478"
+const (
+	defaultSTUNURL         = "stun:stun.rtc.yandex.net:3478"
+	fallbackGoloomSTUNURL  = "stun:goloom.yandex.net:3478"
+)
 
 // Connect starts the WebRTC connection process.
 func (s *Session) Connect(ctx context.Context) error {
@@ -29,7 +32,7 @@ func (s *Session) Connect(ctx context.Context) error {
 
 	config := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
-			{URLs: []string{defaultSTUNURL}},
+			{URLs: []string{defaultSTUNURL, fallbackGoloomSTUNURL}},
 		},
 		SDPSemantics: webrtc.SDPSemanticsUnifiedPlan,
 	}
@@ -113,7 +116,8 @@ func newWebRTCAPI() (*webrtc.API, error) {
 	settingEngine := webrtc.SettingEngine{}
 	settingEngine.LoggerFactory = logger.NewPionLoggerFactory()
 	settingEngine.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
-	settingEngine.SetIPFilter(func(ip net.IP) bool { return ip.To4() != nil })
+	settingEngine.SetIPFilter(func(ip net.IP) bool { return ip.To4() != nil && !ip.IsLoopback() })
+	settingEngine.SetInterfaceFilter(func(name string) bool { return !protect.IsTunnelInterface(name) })
 
 	if protect.Protector != nil {
 		pnet, err := protect.NewProtectedNet()
@@ -526,6 +530,10 @@ func (s *Session) resetMediaState() {
 	s.publisherReady.Store(false)
 	s.subscriberConn = make(chan struct{})
 	s.publisherConn = make(chan struct{})
+	s.iceMu.Lock()
+	s.pendingSubICE = nil
+	s.pendingPubICE = nil
+	s.iceMu.Unlock()
 }
 
 func (s *Session) signalEnded(reason string) {
