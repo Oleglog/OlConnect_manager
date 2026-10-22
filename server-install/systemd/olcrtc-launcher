@@ -190,6 +190,14 @@ if [ "$carrier" = "openflux" ]; then
     if [ -n "${OLCRTC_ROOM_ID:-}" ] && [ "${OLCRTC_ROOM_ID}" != "auto" ]; then
         url_flag="--url ${OLCRTC_ROOM_ID}"
     fi
+    if [ -z "${OLCRTC_ENV_FILE:-}" ]; then
+        inst_num="${PWD##*/olcrtc-}"
+        if [ "$inst_num" != "$PWD" ] && [ -f "/etc/olcrtc/${inst_num}/env" ]; then
+            export OLCRTC_ENV_FILE="/etc/olcrtc/${inst_num}/env"
+        elif [ -f "/etc/olcrtc/env" ]; then
+            export OLCRTC_ENV_FILE="/etc/olcrtc/env"
+        fi
+    fi
     # ponytail: B24 auth rides on env (node reads B24_COOKIES/B24_SESSID/B24_CHAT_ID);
     # OLCRTC_* aliases let the manager pass them through the instance env file.
     [ -n "${OLCRTC_B24_COOKIES:-}" ] && export B24_COOKIES="${OLCRTC_B24_COOKIES}"

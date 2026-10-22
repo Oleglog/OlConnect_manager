@@ -399,6 +399,9 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 
 	svc := InstanceService(newID)
 	_ = SystemctlStart(svc)
+	if carrier == "openflux" && isOpenFluxAutoRoomTransport(transport) && (roomID == "" || roomID == "auto") {
+		s.waitOpenFluxAutoRoom(newID, envPath, transport, 5*time.Second)
+	}
 	writeJSON(w, http.StatusCreated, s.buildInstance(newID))
 }
 
@@ -491,6 +494,9 @@ func (s *Server) updateInstanceConfig(w http.ResponseWriter, r *http.Request, id
 	// Restart service.
 	svc := InstanceService(id)
 	_ = SystemctlRestart(svc)
+	if carrier == "openflux" && isOpenFluxAutoRoomTransport(transport) && (room == "" || room == "auto") {
+		s.waitOpenFluxAutoRoom(id, envPath, transport, 5*time.Second)
+	}
 
 	inst := s.buildInstance(id)
 	if inst.SubscriptionURI != "" {
@@ -702,10 +708,85 @@ func (s *Server) rotateRoom(w http.ResponseWriter, id int) {
 	}
 	svc := InstanceService(id)
 	_ = SystemctlRestart(svc)
+	transport := vals["OLCRTC_TRANSPORT"]
+	if carrier == "openflux" && isOpenFluxAutoRoomTransport(transport) {
+		s.waitOpenFluxAutoRoom(id, envPath, transport, 5*time.Second)
+	}
 	if inst := s.buildInstance(id); inst.SubscriptionURI != "" {
 		_ = s.refreshLinkedSubscriptionInstance(id, inst.SubscriptionURI)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func isOpenFluxAutoRoomTransport(transport string) bool {
+	switch strings.ToLower(strings.TrimSpace(transport)) {
+	case "cups", "cupsonline", "avito":
+		return true
+	default:
+		return false
+	}
+}
+
+func formatOpenFluxRoomURL(transport, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
+		return raw
+	}
+	switch strings.ToLower(strings.TrimSpace(transport)) {
+	case "avito":
+		return "https://code.avito.ru/?rooms=" + raw
+	default:
+		return "https://interview.cups.online/live-coding/?rooms=" + raw
+	}
+}
+
+func extractOpenFluxRoomFromJournal(svc, transport string) string {
+	out, err := exec.Command("journalctl", "-u", svc, "-n", "120", "--no-pager", "-o", "cat").Output()
+	if err != nil || len(out) == 0 {
+		return ""
+	}
+	lines := strings.Split(string(out), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if idx := strings.Index(line, "[INFO] Active room URL:"); idx >= 0 {
+			u := strings.TrimSpace(line[idx+len("[INFO] Active room URL:"):])
+			if u != "" {
+				return formatOpenFluxRoomURL(transport, u)
+			}
+		}
+		if strings.Contains(line, "=== COPY THIS TO CLIENT ===") && i+1 < len(lines) {
+			next := strings.TrimSpace(lines[i+1])
+			if next != "" && !strings.HasPrefix(next, "===") {
+				return formatOpenFluxRoomURL(transport, next)
+			}
+		}
+	}
+	return ""
+}
+
+func (s *Server) waitOpenFluxAutoRoom(id int, envPath, transport string, timeout time.Duration) string {
+	svc := InstanceService(id)
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		vals := ReadInstanceEnv(envPath)
+		room := strings.TrimSpace(vals["OLCRTC_ROOM_ID"])
+		if room != "" && room != "auto" {
+			formatted := formatOpenFluxRoomURL(transport, room)
+			if formatted != room {
+				_ = SetEnvValue(envPath, "OLCRTC_ROOM_ID", formatted)
+			}
+			return formatted
+		}
+		if detected := extractOpenFluxRoomFromJournal(svc, transport); detected != "" {
+			_ = SetEnvValue(envPath, "OLCRTC_ROOM_ID", detected)
+			return detected
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return ""
 }
 
 // rotateClientID generates a new client identifier for the instance and
@@ -810,6 +891,21 @@ func (s *Server) buildInstance(id int) Instance {
 	}
 
 	clientID := s.ensureClientID(envPath, vals["OLCRTC_CLIENT_ID"])
+	if carrier == "openflux" && isOpenFluxAutoRoomTransport(transport) {
+		curRoom := strings.TrimSpace(vals["OLCRTC_ROOM_ID"])
+		if curRoom == "" || curRoom == "auto" {
+			if detected := extractOpenFluxRoomFromJournal(InstanceService(id), transport); detected != "" {
+				vals["OLCRTC_ROOM_ID"] = detected
+				_ = SetEnvValue(envPath, "OLCRTC_ROOM_ID", detected)
+				if uri := s.buildURIWith(vals, clientID); uri != "" {
+					_ = s.refreshLinkedSubscriptionInstance(id, uri)
+				}
+			}
+		} else if formatted := formatOpenFluxRoomURL(transport, curRoom); formatted != curRoom {
+			vals["OLCRTC_ROOM_ID"] = formatted
+			_ = SetEnvValue(envPath, "OLCRTC_ROOM_ID", formatted)
+		}
+	}
 	authToken := strings.TrimSpace(vals["OLCRTC_AUTH_TOKEN"])
 	authExpiresAt, _ := parseJWTExpiry(authToken)
 	openfluxKey := strings.TrimSpace(vals["OLCRTC_OPENFLUX_KEY"])
@@ -1037,15 +1133,15 @@ func (s *Server) buildURIWith(vals map[string]string, clientID string) string {
 	vp8Fps := vals["OLCRTC_VP8_FPS"]
 	vp8Batch := vals["OLCRTC_VP8_BATCH"]
 
-	uri := fmt.Sprintf("olconnect://%s@room/%s?key=%s", carrier, room, key)
+	uri := fmt.Sprintf("olconnect://%s@room/%s?key=%s", carrier, url.PathEscape(room), url.QueryEscape(key))
 	if transport != "" && transport != "datachannel" {
 		uri += "&transport=" + url.QueryEscape(transport)
 		if transport == "vp8channel" {
 			if vp8Fps != "" {
-				uri += "&vp8_fps=" + vp8Fps
+				uri += "&vp8_fps=" + url.QueryEscape(vp8Fps)
 			}
 			if vp8Batch != "" {
-				uri += "&vp8_batch=" + vp8Batch
+				uri += "&vp8_batch=" + url.QueryEscape(vp8Batch)
 			}
 		}
 	}
@@ -1053,7 +1149,10 @@ func (s *Server) buildURIWith(vals map[string]string, clientID string) string {
 	if clientID != "" {
 		uri += "&client_id=" + url.QueryEscape(clientID)
 	}
-	uri += "#" + name
+	if dns := strings.TrimSpace(vals["OLCRTC_DNS"]); dns != "" && dns != "77.88.8.8:53" {
+		uri += "&dns=" + url.QueryEscape(dns)
+	}
+	uri += "#" + url.QueryEscape(name)
 	return uri
 }
 

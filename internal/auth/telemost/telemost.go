@@ -26,12 +26,9 @@ func (Provider) DefaultServiceURL() string { return "https://telemost.yandex.ru"
 // creation is not supported by the Telemost API; rooms originate in the
 // Yandex UI.
 func (Provider) Issue(ctx context.Context, cfg auth.Config) (auth.Credentials, error) {
-	if cfg.RoomURL == "" {
+	roomURL := normalizeRoomURL(cfg.RoomURL)
+	if roomURL == "" {
 		return auth.Credentials{}, auth.ErrRoomIDRequired
-	}
-	roomURL := cfg.RoomURL
-	if !strings.HasPrefix(roomURL, "https://") {
-		roomURL = roomURLPrefix + roomURL
 	}
 	info, err := GetConnectionInfo(ctx, roomURL, cfg.Name)
 	if err != nil {
@@ -47,6 +44,25 @@ func (Provider) Issue(ctx context.Context, cfg auth.Config) (auth.Credentials, e
 			"telemetryReferer": roomURL,
 		},
 	}, nil
+}
+
+func normalizeRoomURL(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	if idx := strings.IndexAny(s, "?#"); idx >= 0 {
+		s = s[:idx]
+	}
+	s = strings.TrimRight(s, "/")
+	if strings.HasPrefix(s, "http://") {
+		s = "https://" + strings.TrimPrefix(s, "http://")
+	} else if strings.HasPrefix(s, "telemost.yandex.") {
+		s = "https://" + s
+	} else if !strings.HasPrefix(s, "https://") {
+		s = roomURLPrefix + strings.TrimLeft(s, "/")
+	}
+	return s
 }
 
 func init() { //nolint:gochecknoinits // auth registration is the canonical Go pattern for plugins

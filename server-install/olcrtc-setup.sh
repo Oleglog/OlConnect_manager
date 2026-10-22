@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO="Oleglog/OlConnect_manager"
 # Fallback release used only when the latest tag cannot be resolved from GitHub.
-INSTALLER_VERSION="2.4.5"
+INSTALLER_VERSION="2.4.7"
 RELEASE_TAG=""
 RELEASE_VERSION=""
 CARRIER_DEFAULT="jitsi"
@@ -653,12 +653,24 @@ if [ "$carrier" = "openflux" ]; then
     elif [ -f "/etc/olcrtc/cookies.txt" ]; then
         cookie_flags="--cookies /etc/olcrtc/cookies.txt"
     fi
+    url_flag=""
+    if [ -n "${OLCRTC_ROOM_ID:-}" ] && [ "${OLCRTC_ROOM_ID}" != "auto" ]; then
+        url_flag="--url ${OLCRTC_ROOM_ID}"
+    fi
+    if [ -z "${OLCRTC_ENV_FILE:-}" ]; then
+        inst_num="${PWD##*/olcrtc-}"
+        if [ "$inst_num" != "$PWD" ] && [ -f "/etc/olcrtc/${inst_num}/env" ]; then
+            export OLCRTC_ENV_FILE="/etc/olcrtc/${inst_num}/env"
+        elif [ -f "/etc/olcrtc/env" ]; then
+            export OLCRTC_ENV_FILE="/etc/olcrtc/env"
+        fi
+    fi
     # ponytail: B24 auth rides on env (node reads B24_COOKIES/B24_SESSID/B24_CHAT_ID);
     # OLCRTC_* aliases let the manager pass them through the instance env file.
     [ -n "${OLCRTC_B24_COOKIES:-}" ] && export B24_COOKIES="${OLCRTC_B24_COOKIES}"
     [ -n "${OLCRTC_B24_SESSID:-}" ] && export B24_SESSID="${OLCRTC_B24_SESSID}"
     [ -n "${OLCRTC_B24_CHAT_ID:-}" ] && export B24_CHAT_ID="${OLCRTC_B24_CHAT_ID}"
-    exec "$OPENFLUX_BIN" --exit-node --url "${OLCRTC_ROOM_ID}" --transport "$t" $mode_flag $local_ip_flag $codec_flag $key_flag $proxy_flags $cookie_flags $debug_flag
+    exec "$OPENFLUX_BIN" --exit-node $url_flag --transport "$t" $mode_flag $local_ip_flag $codec_flag $key_flag $proxy_flags $cookie_flags $debug_flag
 fi
 
 if [ -z "$carrier" ] || [ -z "${OLCRTC_ROOM_ID:-}" ] || [ -z "${OLCRTC_KEY:-}" ]; then
