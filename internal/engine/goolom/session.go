@@ -25,8 +25,8 @@ import (
 
 const (
 	realDataChannelMessageLimit = 12288
-	defaultSendDelayLow         = 2 * time.Millisecond
-	defaultSendDelayMax         = 12 * time.Millisecond
+	defaultSendDelayLow         = 0
+	defaultSendDelayMax         = 0
 	defaultTelemetryInterval    = 20 * time.Second
 	defaultSendQueueSize        = 5000
 	defaultBufferHighWaterMark  = 512 * 1024

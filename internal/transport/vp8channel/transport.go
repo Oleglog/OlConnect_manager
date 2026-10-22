@@ -14,6 +14,7 @@ import (
 	"hash/crc32"
 	"hash/fnv"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -384,8 +385,16 @@ func parseEpochHeader(frame []byte) (uint32, uint32, bool) {
 }
 
 func bindingToken(clientID string) uint32 {
+	raw := strings.TrimSpace(clientID)
+	if idx := strings.IndexAny(raw, "?#"); idx >= 0 {
+		raw = raw[:idx]
+	}
+	raw = strings.TrimRight(raw, "/")
+	if idx := strings.LastIndex(raw, "/"); idx >= 0 {
+		raw = raw[idx+1:]
+	}
 	h := fnv.New32a()
-	_, _ = h.Write([]byte(clientID))
+	_, _ = h.Write([]byte(raw))
 	token := h.Sum32()
 	if token == 0 {
 		token = 1
