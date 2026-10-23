@@ -24,7 +24,7 @@ import (
 // gathering. Keep pptp explicit; it does not match the ppp prefix.
 //
 //nolint:gochecknoglobals // fixed lookup table; a slice cannot be const
-var tunInterfacePrefixes = []string{"tun", "tap", "ppp", "pptp", "wg", "utun"}
+var tunInterfacePrefixes = []string{"tun", "tap", "ppp", "pptp", "wg", "utun", "docker", "br-", "veth", "virbr", "cni", "flannel"}
 
 // ErrUnexpectedConnType is returned when a protected listen/dial yields an
 // unexpected concrete type. The caller closes that connection instead of using

@@ -400,7 +400,7 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 	svc := InstanceService(newID)
 	_ = SystemctlStart(svc)
 	if carrier == "openflux" && isOpenFluxAutoRoomTransport(transport) && (roomID == "" || roomID == "auto") {
-		s.waitOpenFluxAutoRoom(newID, envPath, transport, 5*time.Second)
+		s.waitOpenFluxAutoRoom(newID, envPath, transport, 15*time.Second)
 	}
 	writeJSON(w, http.StatusCreated, s.buildInstance(newID))
 }
@@ -495,7 +495,7 @@ func (s *Server) updateInstanceConfig(w http.ResponseWriter, r *http.Request, id
 	svc := InstanceService(id)
 	_ = SystemctlRestart(svc)
 	if carrier == "openflux" && isOpenFluxAutoRoomTransport(transport) && (room == "" || room == "auto") {
-		s.waitOpenFluxAutoRoom(id, envPath, transport, 5*time.Second)
+		s.waitOpenFluxAutoRoom(id, envPath, transport, 15*time.Second)
 	}
 
 	inst := s.buildInstance(id)
@@ -710,7 +710,7 @@ func (s *Server) rotateRoom(w http.ResponseWriter, id int) {
 	_ = SystemctlRestart(svc)
 	transport := vals["OLCRTC_TRANSPORT"]
 	if carrier == "openflux" && isOpenFluxAutoRoomTransport(transport) {
-		s.waitOpenFluxAutoRoom(id, envPath, transport, 5*time.Second)
+		s.waitOpenFluxAutoRoom(id, envPath, transport, 15*time.Second)
 	}
 	if inst := s.buildInstance(id); inst.SubscriptionURI != "" {
 		_ = s.refreshLinkedSubscriptionInstance(id, inst.SubscriptionURI)

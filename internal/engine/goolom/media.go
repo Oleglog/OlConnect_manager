@@ -240,7 +240,6 @@ func (s *Session) setupICEHandlers() {
 
 const (
 	setSlotsWatchdogInterval = 5 * time.Second
-	setSlotsWatchdogRepeats  = 6
 )
 
 func (s *Session) startSetSlotsWatchdog() {
@@ -255,7 +254,7 @@ func (s *Session) startSetSlotsWatchdog() {
 
 		ticker := time.NewTicker(setSlotsWatchdogInterval)
 		defer ticker.Stop()
-		for range setSlotsWatchdogRepeats {
+		for {
 			select {
 			case <-s.closeCh:
 				return

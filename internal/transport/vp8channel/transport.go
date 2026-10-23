@@ -647,23 +647,23 @@ func (p *streamTransport) writerLoop() {
 			idleTicks = 0
 		case <-ticker.C:
 			ticksSinceKeepalive++
-			if ticksSinceKeepalive >= forceKeepaliveEvery {
-				ticksSinceKeepalive = 0
-				hdr := p.epochHeader()
-				p.writeTrackSample(hdr[:])
-			}
-
 			var sample []byte
 			select {
 			case frame := <-p.outbound:
 				sample = p.batchSample(frame, p.perTickBytes)
 				idleTicks = 0
+				if ticksSinceKeepalive >= forceKeepaliveEvery {
+					ticksSinceKeepalive = 0
+					hdr := p.epochHeader()
+					p.writeTrackSample(hdr[:])
+				}
 			default:
 				idleTicks++
-				if idleTicks < keepaliveEvery {
+				if idleTicks < keepaliveEvery && ticksSinceKeepalive < forceKeepaliveEvery {
 					continue
 				}
 				idleTicks = 0
+				ticksSinceKeepalive = 0
 				hdr := p.epochHeader()
 				sample = hdr[:]
 			}
@@ -1029,6 +1029,10 @@ func (p *streamTransport) getOrCreatePeerKCP(epoch uint32) *kcpRuntime {
 	p.peerStop[epoch] = stop
 	p.peerSeen[epoch] = seen
 	logger.Infof("vp8channel: peer session created epoch=0x%08x", epoch)
+
+	// Emit an immediate keepalive keyframe so the newly joined peer latches
+	// our server epoch without waiting for the next idle tick.
+	out <- hdr[:]
 
 	// Pump outbound frames from this peer's queue into the writer.
 	go p.peerWriterPump(stop, out)

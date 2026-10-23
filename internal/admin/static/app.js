@@ -753,7 +753,7 @@ function buildInstanceAliases(instances, subscriptionName, entries = []) {
   const items = subscriptionGroup ? entries : instances;
   const providers = items.map(item => subscriptionGroup
     ? uriProvider(item.raw_uri)
-    : (cleanInstanceNamePart(item.carrier || 'olcrtc').toLowerCase() || 'olcrtc'));
+    : instanceProviderPrefix(item));
   const totals = new Map();
   providers.forEach(provider => totals.set(provider, (totals.get(provider) || 0) + 1));
   const seen = new Map();
@@ -771,11 +771,32 @@ function buildInstanceAliases(instances, subscriptionName, entries = []) {
   return result;
 }
 
+function instanceProviderPrefix(item) {
+  if (!item) return 'olcrtc';
+  if ((item.carrier || '').toLowerCase() === 'openflux') {
+    return uriProvider(item.subscription_uri || item.uri || '');
+  }
+  return cleanInstanceNamePart(item.carrier || 'olcrtc').toLowerCase() || 'olcrtc';
+}
+
 function uriProvider(rawURI) {
   try {
     const parsed = new URL(rawURI);
-    if (parsed.protocol.toLowerCase() === 'openflux:') return 'openflux';
-    if (parsed.protocol.toLowerCase() !== 'olcrtc:' || !parsed.username) return 'olcrtc';
+    const proto = parsed.protocol.toLowerCase();
+    if (proto === 'openflux:') {
+      const t = (parsed.searchParams.get('t') || parsed.searchParams.get('transport') || '').toLowerCase();
+      const host = (parsed.hostname || '').toLowerCase();
+      const docUrl = ((parsed.searchParams.get('url') || '') + ' ' + (parsed.searchParams.get('u') || '')).toLowerCase();
+      if (t === 'mailru' || host === 'mailru' || docUrl.includes('mail.ru')) return 'openflux_mailru';
+      if (t === 'avito' || host === 'avito' || docUrl.includes('avito.ru')) return 'openflux_avito';
+      if (t === 'cups' || t === 'cupsonline' || host === 'cups' || host === 'cupsonline' || docUrl.includes('cups.online')) return 'openflux_cups';
+      if (t === 'telemost' || host === 'telemost' || docUrl.includes('telemost.yandex.ru')) return 'openflux_telemost';
+      if (t === 'bitrix24' || t === 'bitrix' || host === 'bitrix24' || host === 'bitrix' || docUrl.includes('bitrix24')) return 'openflux_bitrix24';
+      if (t === 'vyandex' || t === 'volga' || host === 'vyandex' || docUrl.includes('/edit/d/')) return 'openflux_volga';
+      if (t === 'yandex' || host === 'yandex' || docUrl.includes('yandex.')) return 'openflux_yandex';
+      return 'openflux';
+    }
+    if ((proto !== 'olcrtc:' && proto !== 'olconnect:') || !parsed.username) return 'olcrtc';
     return cleanInstanceNamePart(decodeURIComponent(parsed.username)).toLowerCase() || 'olcrtc';
   } catch {
     return 'olcrtc';
@@ -815,7 +836,7 @@ function withInstanceName(rawURI, name) {
 
 function renderInstanceCard(inst, context = {}) {
   const card = el('div', 'card card-hover instance-card p-4 flex flex-col gap-3');
-  const displayName = context.displayName || inst.name || inst.label;
+  const displayName = (inst.carrier === 'openflux' && inst.name) ? inst.name : (context.displayName || inst.name || inst.label);
   const displayURI = withInstanceName(inst.uri, displayName);
 
   // Header: status + label
@@ -2579,6 +2600,10 @@ function showCreateInstanceModal() {
         nameField.input.value = 'OpenFlux Cups';
       } else if (finalTransport === 'telemost' || room.includes('telemost.yandex.ru')) {
         nameField.input.value = 'OpenFlux Telemost';
+      } else if (finalTransport === 'bitrix24' || finalTransport === 'bitrix' || room.includes('bitrix24')) {
+        nameField.input.value = 'OpenFlux Bitrix24';
+      } else if (finalTransport === 'vyandex' || room.includes('/edit/d/')) {
+        nameField.input.value = 'OpenFlux Volga';
       } else {
         nameField.input.value = 'OpenFlux Yandex';
       }
@@ -2963,6 +2988,10 @@ function showConfigModal(inst) {
         nameField.input.value = 'OpenFlux Cups';
       } else if (t === 'telemost' || room.includes('telemost.yandex.ru')) {
         nameField.input.value = 'OpenFlux Telemost';
+      } else if (t === 'bitrix24' || t === 'bitrix' || room.includes('bitrix24')) {
+        nameField.input.value = 'OpenFlux Bitrix24';
+      } else if (t === 'vyandex' || room.includes('/edit/d/')) {
+        nameField.input.value = 'OpenFlux Volga';
       } else {
         nameField.input.value = 'OpenFlux Yandex';
       }
@@ -2988,6 +3017,10 @@ function showConfigModal(inst) {
         nameField.input.value = 'OpenFlux Cups';
       } else if (t === 'telemost' || room.includes('telemost.yandex.ru')) {
         nameField.input.value = 'OpenFlux Telemost';
+      } else if (t === 'bitrix24' || t === 'bitrix' || room.includes('bitrix24')) {
+        nameField.input.value = 'OpenFlux Bitrix24';
+      } else if (t === 'vyandex' || room.includes('/edit/d/')) {
+        nameField.input.value = 'OpenFlux Volga';
       } else {
         nameField.input.value = 'OpenFlux Yandex';
       }
@@ -3263,7 +3296,7 @@ async function showManageSubInstancesModal(sub, instances, allSubs) {
   (instances || []).forEach(inst => {
     const linkedEntries = linkedBySource.get(String(inst.id)) || [];
     const initiallyLinked = linkedEntries.length > 0;
-    const baseName = (cleanInstanceNamePart(inst.carrier || 'olcrtc').toLowerCase() || 'olcrtc') + '_' + subscriptionPart;
+    const baseName = instanceProviderPrefix(inst) + '_' + subscriptionPart;
     const rawURI = withInstanceName(inst.subscription_uri || inst.uri || '', baseName);
     const row = el('label', 'radio-row card');
     const checkbox = el('input', '');

@@ -782,7 +782,31 @@ func uriProvider(raw string) string {
 		return "olconnect"
 	}
 	if strings.EqualFold(parsed.Scheme, "openflux") {
-		return "openflux"
+		q := parsed.Query()
+		t := strings.ToLower(strings.TrimSpace(q.Get("t")))
+		if t == "" {
+			t = strings.ToLower(strings.TrimSpace(q.Get("transport")))
+		}
+		host := strings.ToLower(strings.TrimSpace(parsed.Host))
+		docURL := strings.ToLower(q.Get("url") + " " + q.Get("u"))
+		switch {
+		case t == "mailru" || host == "mailru" || strings.Contains(docURL, "mail.ru"):
+			return "openflux_mailru"
+		case t == "avito" || host == "avito" || strings.Contains(docURL, "avito.ru"):
+			return "openflux_avito"
+		case t == "cups" || t == "cupsonline" || host == "cups" || host == "cupsonline" || strings.Contains(docURL, "cups.online"):
+			return "openflux_cups"
+		case t == "telemost" || host == "telemost" || strings.Contains(docURL, "telemost.yandex.ru"):
+			return "openflux_telemost"
+		case t == "bitrix24" || t == "bitrix" || host == "bitrix24" || host == "bitrix" || strings.Contains(docURL, "bitrix24"):
+			return "openflux_bitrix24"
+		case t == "vyandex" || t == "volga" || host == "vyandex" || strings.Contains(docURL, "/edit/d/"):
+			return "openflux_volga"
+		case t == "yandex" || host == "yandex" || strings.Contains(docURL, "yandex."):
+			return "openflux_yandex"
+		default:
+			return "openflux"
+		}
 	}
 	if (!strings.EqualFold(parsed.Scheme, "olconnect") && !strings.EqualFold(parsed.Scheme, "olcrtc")) || parsed.User == nil {
 		return "olconnect"
@@ -811,7 +835,7 @@ func cleanInstanceNamePart(value string) string {
 
 func withURIFragment(raw, fragment string) string {
 	parsed, err := url.Parse(raw)
-	if err != nil || !strings.EqualFold(parsed.Scheme, "olcrtc") {
+	if err != nil || (!strings.EqualFold(parsed.Scheme, "olcrtc") && !strings.EqualFold(parsed.Scheme, "olconnect") && !strings.EqualFold(parsed.Scheme, "openflux")) {
 		return raw
 	}
 	parsed.Fragment = fragment
