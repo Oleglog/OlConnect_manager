@@ -1003,6 +1003,10 @@ func (s *Server) buildCompactURIWith(vals map[string]string, clientID string) st
 				name = "OpenFlux Cups"
 			} else if transport == "telemost" || strings.Contains(room, "telemost.yandex.ru") {
 				name = "OpenFlux Telemost"
+			} else if transport == "bitrix24" || transport == "bitrix" || strings.Contains(room, "bitrix24") {
+				name = "OpenFlux Bitrix24"
+			} else if transport == "vyandex" {
+				name = "OpenFlux Volga"
 			} else {
 				name = "OpenFlux Yandex"
 			}
@@ -1021,6 +1025,10 @@ func (s *Server) buildCompactURIWith(vals map[string]string, clientID string) st
 			host = "cups"
 		} else if transport == "telemost" || strings.Contains(room, "telemost.yandex.ru") {
 			host = "telemost"
+		} else if transport == "bitrix24" || transport == "bitrix" || strings.Contains(room, "bitrix24") {
+			host = "bitrix24"
+		} else if transport == "vyandex" {
+			host = "vyandex"
 		}
 		uri := fmt.Sprintf("openflux://%s?url=%s", host, url.QueryEscape(room))
 		if transport != "" && transport != "auto" {
@@ -1090,6 +1098,10 @@ func (s *Server) buildURIWith(vals map[string]string, clientID string) string {
 				name = "OpenFlux Cups"
 			} else if transport == "telemost" || strings.Contains(room, "telemost.yandex.ru") {
 				name = "OpenFlux Telemost"
+			} else if transport == "bitrix24" || transport == "bitrix" || strings.Contains(room, "bitrix24") {
+				name = "OpenFlux Bitrix24"
+			} else if transport == "vyandex" {
+				name = "OpenFlux Volga"
 			} else {
 				name = "OpenFlux Yandex"
 			}
@@ -1108,6 +1120,10 @@ func (s *Server) buildURIWith(vals map[string]string, clientID string) string {
 			host = "cups"
 		} else if transport == "telemost" || strings.Contains(room, "telemost.yandex.ru") {
 			host = "telemost"
+		} else if transport == "bitrix24" || transport == "bitrix" || strings.Contains(room, "bitrix24") {
+			host = "bitrix24"
+		} else if transport == "vyandex" {
+			host = "vyandex"
 		}
 		uri := fmt.Sprintf("openflux://%s?url=%s", host, url.QueryEscape(room))
 		if transport != "" && transport != "auto" {
