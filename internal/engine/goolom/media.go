@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/openlibrecommunity/olcrtc/internal/engine"
 	"github.com/openlibrecommunity/olcrtc/internal/logger"
 	"github.com/pion/webrtc/v4"
 )
@@ -118,7 +119,13 @@ func (s *Session) handleSdpAnswer(answer map[string]any, uid string) {
 		Type: webrtc.SDPTypeAnswer,
 		SDP:  sdp,
 	}); err != nil {
-		logger.Debugf("SetRemoteDescription error: %v", err)
+		// A rejected answer leaves the publisher PC without a remote
+		// ufrag/pwd, so its ICE agent stays "new" and nothing notices until
+		// the outer readiness timeout (20 s) gives up. Closing it here routes
+		// through the existing Closed handling, which reconnects promptly.
+		// Close can block on TURN deallocation, so it runs off this goroutine.
+		logger.Warnf("goolom publisher SetRemoteDescription failed: %v", err)
+		go func() { _ = s.pcPub.Close() }()
 	} else {
 		s.flushPendingICE(false)
 	}
@@ -429,6 +436,11 @@ func (s *Session) applyServerHelloConfig(serverHello map[string]any) {
 			iceServers = append(iceServers, ice)
 		}
 	}
+	// Drop URLs pion would reject (a portless "turn:host:" or a TURN URL
+	// without credentials fails the WHOLE configuration inside
+	// NewPeerConnection, before a single candidate is gathered). Normalising
+	// fills the scheme's default port instead of discarding a usable relay.
+	iceServers = engine.NormaliseICEServers(iceServers)
 	if len(iceServers) == 0 {
 		return
 	}

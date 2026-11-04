@@ -218,6 +218,15 @@ func (c *Client) bringUpLink(
 	cfg Config,
 	cancel context.CancelFunc,
 ) error {
+	// WatchConnection starts below, before the handshake completes, so a
+	// mid-handshake reconnect can race this call. handleReconnect takes the
+	// same mutex; without serializing, it can install a fresh working session
+	// via its retry loop while this call is still in flight, and then be
+	// overwritten when this call finally stores its own, by-then-stale state.
+	// Safe to hold: every step below is bounded by the handshake/peer wait.
+	c.reconnectMu.Lock()
+	defer c.reconnectMu.Unlock()
+
 	ln, err := transport.New(ctx, cfg.Transport, transport.Config{
 		Carrier:   cfg.Carrier,
 		RoomURL:   cfg.RoomURL,
@@ -257,6 +266,10 @@ func (c *Client) bringUpLink(
 	if err := ln.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect link: %w", err)
 	}
+	// Watch for reconnect requests from here on, not after the handshake: the
+	// goolom DataChannel can close mid-handshake, and the engine's queued
+	// reconnect would otherwise wait on the very handshake it needs to unstick.
+	go ln.WatchConnection(ctx)
 	if err := waitForPeer(ctx, ln); err != nil {
 		return err
 	}
@@ -283,7 +296,6 @@ func (c *Client) bringUpLink(
 	c.recordSession(sid)
 	c.startControlLoop(ctx, cfg, cancel, control)
 
-	go ln.WatchConnection(ctx)
 	return nil
 }
 

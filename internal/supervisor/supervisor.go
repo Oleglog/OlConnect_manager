@@ -88,7 +88,9 @@ func Run(ctx context.Context, cfg Config, run Runner) error {
 	if len(cfg.Profiles) == 0 {
 		return ErrNoProfiles
 	}
-	if cfg.RetryDelay == 0 {
+	// <= 0, not == 0: a negative delay parsed fine and turned failover into a
+	// busy loop, since time.Sleep on a negative duration returns at once.
+	if cfg.RetryDelay <= 0 {
 		cfg.RetryDelay = DefaultRetryDelay
 	}
 	state := newStatusTracker(cfg.Profiles, cfg.HistoryLimit, cfg.OnStatus)

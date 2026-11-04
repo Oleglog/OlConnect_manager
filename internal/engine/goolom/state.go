@@ -124,7 +124,11 @@ func parseTelemetryCfg(serverHello map[string]any) (string, time.Duration, bool)
 	}
 	interval := defaultTelemetryInterval
 	if raw, ok := cfg["sendingInterval"].(float64); ok && raw > 0 {
-		interval = time.Duration(raw) * time.Millisecond
+		// A remote value below 1 ms would round to a non-positive duration,
+		// and time.NewTicker panics on that; clamp instead of trusting it.
+		if d := time.Duration(raw) * time.Millisecond; d >= time.Millisecond {
+			interval = d
+		}
 	}
 	return endpoint, interval, true
 }

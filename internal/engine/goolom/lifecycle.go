@@ -235,6 +235,12 @@ func (s *Session) onPublisherConnectionStateChange(state webrtc.PeerConnectionSt
 		webrtc.PeerConnectionStateFailed,
 		webrtc.PeerConnectionStateClosed:
 		s.publisherReady.Store(false)
+		// The publisher PC carries the vp8channel data track. When it dies the
+		// tunnel has no data path left, but nothing tore it down: reconnect
+		// now rather than waiting for the outer liveness timeout, which sees a
+		// stall and only then asks for a carrier rebuild.
+		logger.Warnf("goolom publisher PC %s - queueing reconnect", state)
+		s.queueReconnectReason("publisher pc " + state.String())
 	case webrtc.PeerConnectionStateUnknown,
 		webrtc.PeerConnectionStateNew,
 		webrtc.PeerConnectionStateConnecting:

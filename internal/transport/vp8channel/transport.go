@@ -32,6 +32,10 @@ import (
 
 const (
 	defaultMaxPayloadSize = 60 * 1024
+	// maxAssembledFrameSize bounds one reassembled VP8 frame so a peer cannot
+	// make us grow the buffer forever by never setting the marker bit. Well
+	// above one payload plus batching overhead, so no real frame reaches it.
+	maxAssembledFrameSize = 4 * defaultMaxPayloadSize
 	defaultConnectTimeout = 60 * time.Second
 	rtpBufSize = 65536
 	// outboundQueueSize bounds KCP packets waiting for the paced writer. Sized
@@ -853,6 +857,16 @@ func (s *vp8FrameState) processRTPPacket(pkt *rtp.Packet) []byte {
 	}
 
 	if !s.frameValid {
+		return nil
+	}
+
+	// The buffer only resets on a start-of-partition bit, a sequence gap or a
+	// marker bit, so a run of packets that never sets the marker grows it
+	// without limit while the peer keeps sending. A frame this large is not
+	// something a writer produces, so wait for the next start-of-partition.
+	if len(s.frameBuf)+len(vp8Payload) > maxAssembledFrameSize {
+		s.frameValid = false
+		s.frameBuf = s.frameBuf[:0]
 		return nil
 	}
 
