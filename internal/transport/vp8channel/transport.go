@@ -171,6 +171,17 @@ type streamTransport struct {
 	peerOut  map[uint32]chan []byte   // epoch → outbound queue
 	peerStop map[uint32]chan struct{} // epoch → writer-pump stop signal
 	peerSeen map[uint32]*atomic.Int64 // epoch → last inbound frame (unix nanos)
+
+	// Directional counters for the verbose [VP8-TRAFFIC] line. When the tunnel
+	// builds and then moves zero bytes, the only question that matters is
+	// which direction stopped: sampled frames from the peer (rx) versus KCP
+	// payloads actually handed to the track (tx). Without them a field log
+	// cannot tell a dead inbound path from a dead outbound one.
+	rxFrames  atomic.Int64
+	rxBytes   atomic.Int64
+	txSamples atomic.Int64
+	txBytes   atomic.Int64
+	statsDone chan struct{}
 }
 
 // New creates a vp8channel transport backed by a carrier engine.
@@ -264,6 +275,7 @@ func newStreamTransport(
 		outbound:      make(chan []byte, outboundQueueSize),
 		closeCh:       make(chan struct{}),
 		writerDone:    make(chan struct{}),
+		statsDone:     make(chan struct{}),
 		frameInterval: time.Second / time.Duration(fps),
 		batchSize:     batchSize,
 		perTickBytes:  perTickBytes,
@@ -328,6 +340,7 @@ func (p *streamTransport) Connect(ctx context.Context) error {
 	p.writerOnce.Do(func() {
 		p.writerUp.Store(true)
 		go p.writerLoop()
+		go p.statsLoop()
 	})
 
 	return nil
@@ -490,6 +503,7 @@ func (p *streamTransport) Close() error {
 
 		if p.writerUp.Load() {
 			<-p.writerDone
+			<-p.statsDone
 		}
 		if err := p.stream.Close(); err != nil {
 			return fmt.Errorf("close stream: %w", err)
@@ -621,10 +635,39 @@ func (p *streamTransport) writeTrackSample(data []byte) {
 	}
 	p.lastWrite = now
 
+	p.txSamples.Add(1)
+	p.txBytes.Add(int64(len(data)))
 	_ = p.track.WriteSample(media.Sample{
 		Data:     data,
 		Duration: dur,
 	})
+}
+
+// statsLoop emits the directional counters every 5s in verbose mode. A tunnel
+// that builds and then moves zero bytes is the one failure this transport has
+// repeatedly shipped without enough evidence to name a direction; this line
+// answers "did frames arrive, did we write to the track" from a field log.
+func (p *streamTransport) statsLoop() {
+	defer close(p.statsDone)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	var lastRx, lastTx, lastRxB, lastTxB int64
+	for {
+		select {
+		case <-p.closeCh:
+			return
+		case <-ticker.C:
+			rx, tx := p.rxFrames.Load(), p.txSamples.Load()
+			rxB, txB := p.rxBytes.Load(), p.txBytes.Load()
+			if !logger.IsVerbose() {
+				lastRx, lastTx, lastRxB, lastTxB = rx, tx, rxB, txB
+				continue
+			}
+			logger.Infof("[VP8-TRAFFIC] peerFrames=%d(+%d) peerBytes=%d(+%d) samples=%d(+%d) sampleBytes=%d(+%d)",
+				rx, rx-lastRx, rxB, rxB-lastRxB, tx, tx-lastTx, txB, txB-lastTxB)
+			lastRx, lastTx, lastRxB, lastTxB = rx, tx, rxB, txB
+		}
+	}
 }
 
 func (p *streamTransport) writerLoop() {
@@ -958,6 +1001,8 @@ func (p *streamTransport) handleIncomingFrame(frame []byte) {
 	if len(kcpPayload) == 0 {
 		return
 	}
+	p.rxFrames.Add(1)
+	p.rxBytes.Add(int64(len(kcpPayload)))
 	p.kcpMu.RLock()
 	rt := p.kcp
 	p.kcpMu.RUnlock()
@@ -999,6 +1044,8 @@ func (p *streamTransport) handlePeerFrame(peerEpoch uint32, kcpPayload []byte) {
 
 	rt := p.getOrCreatePeerKCP(peerEpoch)
 	if rt != nil {
+		p.rxFrames.Add(1)
+		p.rxBytes.Add(int64(len(kcpPayload)))
 		deliverKCPPayload(rt, kcpPayload)
 	}
 }
