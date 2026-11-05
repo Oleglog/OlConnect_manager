@@ -53,21 +53,16 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
-// ── Theme helper ─────────────────────────────────────────────────────────────
+// ── Theme ────────────────────────────────────────────────────────────────────
+// One theme: strict black & white. The light/dark switch is gone on purpose —
+// maintaining two palettes doubled every visual decision and the accent hue
+// competed with the status colours. Everything now distinguishes by luminance.
 function getTheme() {
-  return localStorage.getItem('olcrtc_theme') || 'dark';
+  return 'dark';
 }
 
-function setTheme(theme) {
-  localStorage.setItem('olcrtc_theme', theme);
-  document.documentElement.setAttribute('data-theme', theme);
-}
-
-function toggleTheme() {
-  const current = getTheme();
-  const next = current === 'dark' ? 'light' : 'dark';
-  setTheme(next);
-  return next;
+function setTheme() {
+  document.documentElement.setAttribute('data-theme', 'dark');
 }
 
 // ── DOM helpers ──────────────────────────────────────────────────────────────
@@ -352,19 +347,10 @@ function renderShell(activeSection) {
   });
 
   const footer = el('div', 'sidebar-footer');
-  const themeBtn = el('button', 'sidebar-link');
-  themeBtn.setAttribute('aria-label', 'Сменить тему');
-  themeBtn.innerHTML = (getTheme() === 'dark' ? icon('sun') : icon('moon')) + '<span>Тема</span>';
-  themeBtn.onclick = () => {
-    toggleTheme();
-    themeBtn.innerHTML = (getTheme() === 'dark' ? icon('sun') : icon('moon')) + '<span>Тема</span>';
-  };
-  themeBtn.title = 'Сменить тему (светлая/тёмная)';
   const logoutBtn = el('button', 'sidebar-link');
   logoutBtn.setAttribute('aria-label', 'Выход');
   logoutBtn.innerHTML = icon('log-out') + '<span>Выход</span>';
   logoutBtn.onclick = () => { creds = null; localStorage.removeItem('olcrtc_creds'); route('/login'); };
-  footer.appendChild(themeBtn);
   footer.appendChild(logoutBtn);
   sidebar.appendChild(footer);
 
@@ -810,14 +796,24 @@ function cleanInstanceNamePart(value) {
     .replace(/^_+|_+$/g, '');
 }
 
+// Group colours are steps of one grey scale, not hues. A subscription still
+// gets a stable, distinct identity (same slug -> same step), but the panel
+// stays black & white and the identity never competes with a status colour.
+// Eight steps is the practical ceiling: past that, adjacent steps stop being
+// distinguishable on a dark canvas.
+const GROUP_STEPS = ['#f5f5f5', '#d4d4d4', '#b3b3b3', '#929292',
+                     '#717171', '#555555', '#3d3d3d', '#292929'];
+
 function subscriptionGroupColor(value) {
   let hash = 0;
   for (const char of String(value || 'subscription')) hash = ((hash * 31) + char.codePointAt(0)) | 0;
-  const hue = Math.abs(hash) % 360;
+  const tone = GROUP_STEPS[Math.abs(hash) % GROUP_STEPS.length];
   return {
-    accent: `hsl(${hue} 70% 58%)`,
-    border: `hsl(${hue} 55% 45% / .55)`,
-    background: `hsl(${hue} 55% 45% / .08)`,
+    accent: tone,
+    border: tone,
+    // The tint is a low-alpha wash of the same tone, so a group block reads as
+    // one shade rather than a fill plus an unrelated outline.
+    background: `color-mix(in srgb, ${tone} 7%, transparent)`,
   };
 }
 
@@ -3834,7 +3830,7 @@ function showUpdateOverlay(targetVersion, targetBranch, kick) {
 // ── Init ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   // Initialize theme
-  setTheme(getTheme());
+  setTheme();
   render();
 });
 })();

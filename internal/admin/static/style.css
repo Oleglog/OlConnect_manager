@@ -1,32 +1,63 @@
-/* OlConnect Manager — Lavender, Black & White Design System */
+/* OlConnect Manager — strict black & white design system.
+ *
+ * One theme, no toggle. The panel had a lavender accent plus a light/dark
+ * switch, which meant every visual decision had to work twice and the accent
+ * competed with the status colours. Monochrome removes both problems: the
+ * accent is gone, and meaning is carried by luminance (how bright a thing is)
+ * and by shape, never by hue alone. Status stays readable for colour-blind
+ * users because success/error also differ in weight and border, not just tone.
+ */
 
 /* ── Design Tokens ────────────────────────────────────────────────────────── */
 :root {
-  /* Dark theme (default): Deep Black, Pure White, and Vibrant Lavender */
-  --color-primary: #9d72e8;
-  --color-primary-hover: #b08af8;
-  --color-primary-focus: #8353d9;
-  --color-lavender-subtle: rgba(157, 114, 232, 0.12);
-  --color-lavender-border: rgba(157, 114, 232, 0.28);
+  /* Monochrome accent: the single "this is interactive" tone. */
+  --color-primary: #ffffff;
+  --color-primary-hover: #e6e6e6;
+  --color-primary-focus: #cccccc;
+
+  /* Accent fills are inversions, not tints. */
+  --color-accent: #ffffff;
+  --color-accent-ink: #0a0a0a;
+  --color-accent-subtle: rgba(255, 255, 255, 0.07);
+  --color-accent-border: rgba(255, 255, 255, 0.22);
+
+  /* Legacy names kept so markup that still references them keeps rendering. */
+  --color-lavender-subtle: var(--color-accent-subtle);
+  --color-lavender-border: var(--color-accent-border);
 
   --color-ink: #ffffff;
-  --color-ink-muted: #cfcbdc;
-  --color-ink-subtle: #948fa8;
-  --color-ink-tertiary: #67637c;
+  --color-ink-muted: #c8c8c8;
+  --color-ink-subtle: #8e8e8e;
+  --color-ink-tertiary: #5e5e5e;
 
-  --color-canvas: #09090d;
-  --color-surface-1: #121217;
-  --color-surface-2: #181822;
-  --color-surface-3: #21212e;
+  --color-canvas: #050505;
+  --color-surface-1: #0e0e0e;
+  --color-surface-2: #151515;
+  --color-surface-3: #1d1d1d;
 
-  --color-hairline: #242332;
-  --color-hairline-strong: #3d3854;
-  --color-hairline-tertiary: #524c70;
+  --color-hairline: #232323;
+  --color-hairline-strong: #383838;
+  --color-hairline-tertiary: #4d4d4d;
 
-  --color-success: #10b981;
-  --color-error: #f43f5e;
+  /* Status: brightness carries the signal, hue is not used at all. Success is
+   * the brightest ink, failure a mid grey — a difference that survives both a
+   * monochrome palette and colour blindness. */
+  --color-success: #ffffff;
+  --color-success-strong: #ffffff;
+  --color-error: #7a7a7a;
+  --color-error-strong: #ffffff;
 
-  /* Rounded */
+  /* Group colours: eight steps of grey, ordered light to dark. Groups are told
+   * apart by position in the scale, so the palette stays monochrome. */
+  --group-1: #f5f5f5;
+  --group-2: #d4d4d4;
+  --group-3: #b3b3b3;
+  --group-4: #929292;
+  --group-5: #717171;
+  --group-6: #555555;
+  --group-7: #3d3d3d;
+  --group-8: #292929;
+
   --rounded-xs: 4px;
   --rounded-sm: 6px;
   --rounded-md: 8px;
@@ -34,7 +65,6 @@
   --rounded-xl: 16px;
   --rounded-pill: 9999px;
 
-  /* Spacing */
   --spacing-xs: 8px;
   --spacing-sm: 12px;
   --spacing-md: 16px;
@@ -42,33 +72,8 @@
   --spacing-xl: 32px;
 }
 
-/* Light theme: Crisp White, Deep Black, and Soft Lavender */
-[data-theme="light"] {
-  --color-primary: #8b5cf6;
-  --color-primary-hover: #7c3aed;
-  --color-primary-focus: #6d28d9;
-  --color-lavender-subtle: rgba(139, 92, 246, 0.1);
-  --color-lavender-border: rgba(139, 92, 246, 0.25);
-
-  --color-ink: #0a0910;
-  --color-ink-muted: #2d2b3c;
-  --color-ink-subtle: #615c78;
-  --color-ink-tertiary: #9089a8;
-
-  --color-canvas: #faf9fc;
-  --color-surface-1: #ffffff;
-  --color-surface-2: #f3f1f8;
-  --color-surface-3: #eae5f5;
-
-  --color-hairline: #e4e0f0;
-  --color-hairline-strong: #cbc0ea;
-  --color-hairline-tertiary: #b4a4df;
-
-  --color-success: #10b981;
-  --color-error: #f43f5e;
-}
-
 body {
+  color-scheme: dark;
   font-family: 'Plus Jakarta Sans', -apple-system, system-ui, 'SF Pro Display', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   background: var(--color-canvas);
   color: var(--color-ink);
@@ -232,15 +237,17 @@ body {
   border-radius: var(--rounded-sm);
 }
 
+/* Primary is an inversion: white plate, black label. In monochrome that is
+ * the strongest "act here" signal available, and it needs no accent hue. */
 .btn-primary {
-  background: var(--color-primary);
-  color: #ffffff;
-  box-shadow: 0 2px 8px -1px rgba(157, 114, 232, 0.4);
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+  box-shadow: 0 2px 8px -1px rgba(255, 255, 255, 0.12);
 }
 
 .btn-primary:hover:not(:disabled) {
   background: var(--color-primary-hover);
-  box-shadow: 0 4px 14px -1px rgba(157, 114, 232, 0.55);
+  box-shadow: 0 4px 14px -1px rgba(255, 255, 255, 0.18);
 }
 
 .btn-primary:active:not(:disabled) {
@@ -248,21 +255,24 @@ body {
 }
 
 .btn-success {
-  background: var(--color-success);
-  color: #ffffff;
+  background: #ffffff;
+  color: #050505;
 }
 
 .btn-success:hover:not(:disabled) {
-  background: #059669;
+  background: #e6e6e6;
 }
 
+/* Destructive stays distinguishable by outline weight, not by red. */
 .btn-danger {
-  background: var(--color-error);
-  color: #ffffff;
+  background: transparent;
+  color: var(--color-ink);
+  border: 1px solid var(--color-hairline-tertiary);
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: #e11d48;
+  background: var(--color-surface-3);
+  border-color: var(--color-ink-muted);
 }
 
 .btn-secondary {
@@ -300,14 +310,18 @@ body {
   display: inline-block;
 }
 
+/* Running is a bright filled dot; failed is a hollow one with a wide ring.
+ * The shapes differ, so the two states are told apart without relying on
+ * hue — which is exactly what a monochrome panel needs. */
 .status-running {
-  background: #10b981;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25);
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.22);
 }
 
 .status-failed {
-  background: var(--color-error);
-  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.25);
+  background: transparent;
+  border: 1.5px solid var(--color-ink-muted);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
 }
 
 .status-inactive {
@@ -327,16 +341,17 @@ body {
   letter-spacing: 0.04em;
 }
 
+/* Running reads as a bright filled pill; failed as a dim outlined one. */
 .status-pill-running {
-  background: rgba(16, 185, 129, 0.12);
-  color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.25);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-ink);
+  border: 1px solid rgba(255, 255, 255, 0.28);
 }
 
 .status-pill-failed {
-  background: rgba(244, 63, 94, 0.12);
-  color: #fb7185;
-  border: 1px solid rgba(244, 63, 94, 0.25);
+  background: transparent;
+  color: var(--color-ink-subtle);
+  border: 1px solid var(--color-hairline-tertiary);
 }
 
 .status-pill-inactive {
@@ -359,28 +374,31 @@ body {
   border: 1px solid var(--color-hairline);
 }
 
+/* Badges differ by fill weight and border strength, not by hue. A "strong"
+ * badge is filled, a "quiet" one is an outline — that ordering survives both
+ * colour blindness and a monochrome palette. */
 .badge-lavender {
-  background: var(--color-lavender-subtle);
-  color: var(--color-primary);
-  border-color: var(--color-lavender-border);
+  background: var(--color-accent-subtle);
+  color: var(--color-ink);
+  border-color: var(--color-accent-border);
 }
 
 .badge-emerald {
-  background: rgba(16, 185, 129, 0.12);
-  color: #34d399;
-  border-color: rgba(16, 185, 129, 0.25);
+  background: var(--color-surface-3);
+  color: var(--color-ink);
+  border-color: var(--color-hairline-tertiary);
 }
 
 .badge-amber {
-  background: rgba(245, 158, 11, 0.12);
-  color: #fbbf24;
-  border-color: rgba(245, 158, 11, 0.25);
+  background: transparent;
+  color: var(--color-ink-muted);
+  border-color: var(--color-hairline-strong);
 }
 
 .badge-blue {
-  background: var(--color-lavender-subtle);
-  color: var(--color-primary);
-  border-color: var(--color-lavender-border);
+  background: var(--color-accent-subtle);
+  color: var(--color-ink);
+  border-color: var(--color-accent-border);
 }
 
 /* ── Modals ─────────────────────────────────────────────────────────────── */
@@ -600,7 +618,7 @@ input:disabled, input[readonly] {
 }
 
 .toast-error {
-  border-color: rgba(244, 63, 94, 0.4);
+  border-color: var(--color-hairline-tertiary);
 }
 
 .toast-error .toast-icon {
