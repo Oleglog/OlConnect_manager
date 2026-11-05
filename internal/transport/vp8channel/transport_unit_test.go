@@ -178,11 +178,17 @@ func TestPeerWriterPumpIsPaced(t *testing.T) {
 	// the track and the SFU stopped forwarding it, which is why one direction
 	// carried traffic and the other did not. Pin the pacing: segments queued
 	// back to back must not each become a sample.
+	track, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, "video", "test")
+	if err != nil {
+		t.Fatalf("NewTrackLocalStaticSample: %v", err)
+	}
 	tr := &streamTransport{
 		closeCh:       make(chan struct{}),
 		frameInterval: time.Second / 60,
 		batchSize:     1,
 		perTickBytes:  defaultMaxPayloadSize,
+		track:         track,
 	}
 	out := make(chan []byte, 16)
 	stop := make(chan struct{})
