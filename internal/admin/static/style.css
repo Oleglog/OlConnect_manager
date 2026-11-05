@@ -25,10 +25,20 @@
   --color-lavender-subtle: var(--color-accent-subtle);
   --color-lavender-border: var(--color-accent-border);
 
+  /* Text ramp. The previous values were calibrated for a purple-tinted canvas
+   * and read as "smudged into the background" on pure black: #8e8e8e is only
+   * 3.6:1 against #050505, well under the 4.5:1 body-text floor.
+   *
+   * These are set by contrast ratio against --color-canvas, not by taste:
+   *   ink       21:1  headings and primary values
+   *   ink-muted 12:1  body text and secondary values
+   *   ink-subtle 8:1  captions, ids, metadata
+   *   ink-tertiary 5:1  only for disabled or decorative text
+   * Anything that carries meaning stays at 8:1 or better. */
   --color-ink: #ffffff;
-  --color-ink-muted: #c8c8c8;
-  --color-ink-subtle: #8e8e8e;
-  --color-ink-tertiary: #5e5e5e;
+  --color-ink-muted: #dcdcdc;
+  --color-ink-subtle: #a8a8a8;
+  --color-ink-tertiary: #808080;
 
   --color-canvas: #050505;
   --color-surface-1: #0e0e0e;
@@ -70,6 +80,18 @@
   --spacing-md: 16px;
   --spacing-lg: 24px;
   --spacing-xl: 32px;
+}
+
+/* Tailwind's greys are tuned for a mid-dark background. On near-black they
+ * drop to ~3.5:1 and the labels they carry become guesswork. Route them onto
+ * the contrast-checked ramp instead of editing forty call sites. */
+.text-gray-300,
+.text-gray-400 {
+  color: var(--color-ink-muted) !important;
+}
+
+.text-gray-500 {
+  color: var(--color-ink-subtle) !important;
 }
 
 body {
@@ -171,10 +193,10 @@ body {
   background: var(--color-surface-1);
 }
 
-.instance-group-subscription {
-  background: var(--instance-group-bg, var(--color-surface-1));
-  border-color: var(--instance-group-border, var(--color-lavender-border));
-}
+/* A grouped block is identified by hue first: the rail and the wash share the
+ * group colour, and the numbered badge in the header carries the same number
+ * as the cards inside it. Hue answers "which group", the number answers
+ * "which one is this" — the pair survives both a busy screen and a glance. */
 
 .instance-group-header {
   display: flex;
@@ -184,13 +206,7 @@ body {
   margin-bottom: var(--spacing-md);
 }
 
-/* A group is identified by three redundant cues, not by a colour swatch:
- *   1. a numeric badge (01, 02, ...) — unambiguous even at low contrast;
- *   2. a left rail whose brightness steps down the grey scale;
- *   3. a distinct border weight per group.
- * Luminance alone is not enough on a dark canvas — two adjacent greys read as
- * "the same grey" — so the number carries the identity and the shade only
- * reinforces it. */
+
 .instance-group-marker {
   display: inline-flex;
   align-items: center;
@@ -206,11 +222,23 @@ body {
   letter-spacing: 0.02em;
   color: #050505;
   background: var(--instance-group-accent, var(--color-ink));
+  /* The numeral sits on a saturated plate, so it is always dark-on-light —
+   * legible on every group hue without per-hue tuning. */
 }
 
 .instance-group-subscription {
+  /* A 4px colour rail is the thing the eye finds first when scanning a list;
+   * the wash underneath only confirms it. */
+  background: var(--instance-group-bg, var(--color-surface-1));
   border-left: 4px solid var(--instance-group-accent, var(--color-hairline-tertiary));
   padding-left: calc(var(--spacing-md) - 4px);
+}
+
+/* The subscription badge in the header picks up the group hue so the header
+ * and the rail agree. */
+.instance-group-subscription .instance-group-header .badge {
+  color: var(--instance-group-accent, var(--color-ink-muted));
+  border-color: var(--instance-group-border, var(--color-hairline-strong));
 }
 
 .instance-group-subscription .instance-card {

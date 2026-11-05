@@ -810,18 +810,26 @@ function cleanInstanceNamePart(value) {
 // stays black & white and the identity never competes with a status colour.
 // Eight steps is the practical ceiling: past that, adjacent steps stop being
 // distinguishable on a dark canvas.
-const GROUP_STEPS = ['#ffffff', '#c9c9c9', '#9a9a9a', '#6e6e6e'];
+// Group identity is a hue, not a shade. A monochrome ramp failed in practice:
+// two adjacent greys on a near-black canvas read as "the same grey", so the
+// user could not tell which instance belonged to which subscription.
+//
+// The palette is deliberately narrow and desaturated — six hues, all around
+// 55% lightness so none of them outranks a status colour — and it is separate
+// from the monochrome chrome. The UI stays black & white except for this one
+// job, where colour is the actual information.
+const GROUP_HUES = [200, 275, 145, 25, 320, 175];
 
 function subscriptionGroupColor(value) {
   let hash = 0;
   for (const char of String(value || 'subscription')) hash = ((hash * 31) + char.codePointAt(0)) | 0;
-  const tone = GROUP_STEPS[Math.abs(hash) % GROUP_STEPS.length];
+  const hue = GROUP_HUES[Math.abs(hash) % GROUP_HUES.length];
   return {
-    accent: tone,
-    border: tone,
-    // The tint is a low-alpha wash of the same tone, so a group block reads as
-    // one shade rather than a fill plus an unrelated outline.
-    background: `color-mix(in srgb, ${tone} 7%, transparent)`,
+    accent: `hsl(${hue} 62% 56%)`,
+    border: `hsl(${hue} 55% 48%)`,
+    // A low-alpha wash of the same hue keeps the block readable on black
+    // without turning it into a coloured slab.
+    background: `hsl(${hue} 55% 45% / 0.10)`,
   };
 }
 
