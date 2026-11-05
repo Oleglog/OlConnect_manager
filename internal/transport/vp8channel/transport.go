@@ -459,8 +459,15 @@ func (p *streamTransport) SendTo(peerID string, data []byte) error {
 	}
 	p.peersMu.RLock()
 	rt := p.peers[epoch]
+	known := len(p.peers)
 	p.peersMu.RUnlock()
 	if rt == nil {
+		// A live smux stream addressing an epoch we already reaped is the
+		// exact failure this transport keeps shipping: the stream dies with
+		// "closed pipe" and the field log shows only zero-byte traffic.
+		// Record who asked, how much, and whether the epoch ever existed.
+		logger.Infof("vp8channel: SendTo unknown peer epoch=0x%08x bytes=%d knownPeers=%d",
+			epoch, len(data), known)
 		return ErrTransportClosed
 	}
 	return rt.send(data)
@@ -476,7 +483,7 @@ func (p *streamTransport) SupportsPeerRouting() bool {
 func (p *streamTransport) DropPeer(peerID string) {
 	epoch, err := parsePeerID(peerID)
 	if err == nil {
-		p.evictPeer(epoch)
+		p.evictPeerReason(epoch, "session-closed")
 	}
 }
 
@@ -1157,7 +1164,7 @@ func (p *streamTransport) evictIdlePeers() {
 // kcpConn close signal, so the peer's outbound channel never sees another
 // writer and is left for GC rather than closed (avoids a send-on-closed race).
 // Safe to call for an unknown epoch (no-op).
-func (p *streamTransport) evictPeer(epoch uint32) {
+func (p *streamTransport) evictPeerReason(epoch uint32, reason string) {
 	p.peersMu.Lock()
 	rt := p.peers[epoch]
 	stop := p.peerStop[epoch]
@@ -1173,7 +1180,15 @@ func (p *streamTransport) evictPeer(epoch uint32) {
 	if stop != nil {
 		close(stop)
 	}
-	logger.Infof("vp8channel: peer session evicted epoch=0x%08x (idle)", epoch)
+	logger.Infof("vp8channel: peer session evicted epoch=0x%08x (reason=%s)", epoch, reason)
+}
+
+// evictPeer is the idle-reaper entry point. The reason is spelled out because a
+// line reading "(idle)" used to cover every eviction path, including the ones a
+// live session triggers on purpose — which made a teardown race look like a
+// timeout in the field log.
+func (p *streamTransport) evictPeer(epoch uint32) {
+	p.evictPeerReason(epoch, "idle-reaper")
 }
 
 func formatPeerID(epoch uint32) string {

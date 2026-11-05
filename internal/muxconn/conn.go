@@ -268,6 +268,12 @@ func (c *Conn) Write(p []byte) (int, error) {
 		return 0, fmt.Errorf("encrypt: %w", err)
 	}
 	if err := c.send(enc); err != nil {
+		// smux turns any Write error into a session teardown, so every stream
+		// on this peer dies at once with "closed pipe". That is why a single
+		// reaped peer epoch shows up in the field as a tunnel that carries
+		// zero bytes. Name the failing send here, where the peer id and the
+		// payload size are still known.
+		logger.Infof("muxconn: send failed bytes=%d: %v", len(p), err)
 		return 0, fmt.Errorf("send: %w", err)
 	}
 	return len(p), nil
