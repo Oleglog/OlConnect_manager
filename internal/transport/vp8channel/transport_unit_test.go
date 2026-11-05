@@ -171,6 +171,35 @@ func TestNewConnectSendCallbacksFeaturesAndClose(t *testing.T) {
 	}
 }
 
+func TestPeerWriterPumpIsPaced(t *testing.T) {
+	// The client→server direction runs through the paced local writerLoop;
+	// the server→client direction runs through peerWriterPump. Writing one
+	// sample per KCP segment (the old behaviour) put an unpaced RTP burst on
+	// the track and the SFU stopped forwarding it, which is why one direction
+	// carried traffic and the other did not. Pin the pacing: segments queued
+	// back to back must not each become a sample.
+	tr := &streamTransport{
+		closeCh:       make(chan struct{}),
+		frameInterval: time.Second / 60,
+		batchSize:     1,
+		perTickBytes:  defaultMaxPayloadSize,
+	}
+	out := make(chan []byte, 16)
+	stop := make(chan struct{})
+	go tr.peerWriterPump(stop, out)
+
+	for i := 0; i < 10; i++ {
+		out <- []byte("x")
+	}
+	time.Sleep(3 * tr.frameInterval)
+	close(stop)
+
+	// Three ticks must produce at most a handful of samples, never ten.
+	if got := tr.txSamples.Load(); got > 4 {
+		t.Fatalf("peerWriterPump wrote %d samples in 3 ticks, want pacing (<=4)", got)
+	}
+}
+
 func TestNewErrorPaths(t *testing.T) {
 	enginebuiltin.Register("vp8channel-create-fails", func(context.Context, enginebuiltin.Config) (engine.Session, error) {
 		return nil, errVP8UnitBoom

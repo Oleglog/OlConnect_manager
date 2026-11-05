@@ -684,9 +684,15 @@ func (p *streamTransport) writerLoop() {
 	defer ticker.Stop()
 
 	keepaliveEvery := max(int(keepaliveIdlePeriod/p.frameInterval), 1)
-	forceKeepaliveEvery := max(int((2*time.Second)/p.frameInterval), 1)
 	idleTicks := 0
-	ticksSinceKeepalive := 0
+	// keyframeAt is a wall-clock deadline, not a tick counter. The data branch
+	// below writes immediately on every queued frame and never waits for a
+	// tick, so a counter incremented only in the tick branch stops moving
+	// exactly when bulk traffic saturates the queue — and the periodic
+	// decodable keyframe silently stops being emitted. The SFU asks for a
+	// keyframe (PLI), gets none, and after its decode timeout (~40s) stops
+	// forwarding the published track to subscribers.
+	keyframeAt := time.Now().Add(2 * time.Second)
 
 	for {
 		select {
@@ -699,25 +705,29 @@ func (p *streamTransport) writerLoop() {
 			// savings — the batcher drains the queue non-blockingly below.
 			p.writeTrackSample(p.batchSample(frame, p.perTickBytes))
 			idleTicks = 0
+			if !time.Now().Before(keyframeAt) {
+				keyframeAt = time.Now().Add(2 * time.Second)
+				hdr := p.epochHeader()
+				p.writeTrackSample(hdr[:])
+			}
 		case <-ticker.C:
-			ticksSinceKeepalive++
 			var sample []byte
 			select {
 			case frame := <-p.outbound:
 				sample = p.batchSample(frame, p.perTickBytes)
 				idleTicks = 0
-				if ticksSinceKeepalive >= forceKeepaliveEvery {
-					ticksSinceKeepalive = 0
+				if !time.Now().Before(keyframeAt) {
+					keyframeAt = time.Now().Add(2 * time.Second)
 					hdr := p.epochHeader()
 					p.writeTrackSample(hdr[:])
 				}
 			default:
 				idleTicks++
-				if idleTicks < keepaliveEvery && ticksSinceKeepalive < forceKeepaliveEvery {
+				if idleTicks < keepaliveEvery && time.Now().Before(keyframeAt) {
 					continue
 				}
 				idleTicks = 0
-				ticksSinceKeepalive = 0
+				keyframeAt = time.Now().Add(2 * time.Second)
 				hdr := p.epochHeader()
 				sample = hdr[:]
 			}
@@ -1109,19 +1119,38 @@ func (p *streamTransport) getOrCreatePeerKCP(epoch uint32) *kcpRuntime {
 }
 
 // peerWriterPump drains a peer's outbound KCP queue and writes frames to the
-// shared video track. Stops when the channel is closed or transport shuts down.
+// shared video track.
+//
+// It is paced exactly like the local writerLoop: at most one WriteSample per
+// frameInterval, batching whatever KCP segments are already queued. Writing
+// one sample per segment instead (the previous behaviour) put an unbounded
+// burst of RTP frames on the track, and that is the shape the SFU punishes —
+// it stops forwarding a published track whose frame cadence it cannot follow.
+// The client→server direction has always gone through the paced local writer,
+// which is why one direction carried traffic and the other did not.
 func (p *streamTransport) peerWriterPump(stop chan struct{}, out chan []byte) {
+	ticker := time.NewTicker(p.frameInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-p.closeCh:
 			return
 		case <-stop:
 			return
+		case <-ticker.C:
+		}
+
+		select {
 		case frame, ok := <-out:
 			if !ok {
 				return
 			}
-			p.writeTrackSample(frame)
+			p.writeTrackSample(p.batchSampleFrom(out, frame, p.perTickBytes))
+		case <-p.closeCh:
+			return
+		case <-stop:
+			return
+		default:
 		}
 	}
 }
