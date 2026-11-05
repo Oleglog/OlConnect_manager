@@ -1159,11 +1159,15 @@ func (p *streamTransport) evictIdlePeers() {
 	}
 }
 
-// evictPeer tears down a single peer epoch: its KCP runtime, writer pump, and
-// bookkeeping. Closing the KCP runtime unblocks any pending WriteTo via the
+// evictPeerReason tears down a single peer epoch: its KCP runtime, writer pump,
+// and bookkeeping. Closing the KCP runtime unblocks any pending WriteTo via the
 // kcpConn close signal, so the peer's outbound channel never sees another
 // writer and is left for GC rather than closed (avoids a send-on-closed race).
 // Safe to call for an unknown epoch (no-op).
+//
+// The reason is a parameter because a line reading "(idle)" used to cover every
+// eviction path, including the ones a live session triggers on purpose — which
+// made a teardown race look like a timeout in the field log.
 func (p *streamTransport) evictPeerReason(epoch uint32, reason string) {
 	p.peersMu.Lock()
 	rt := p.peers[epoch]
@@ -1183,10 +1187,7 @@ func (p *streamTransport) evictPeerReason(epoch uint32, reason string) {
 	logger.Infof("vp8channel: peer session evicted epoch=0x%08x (reason=%s)", epoch, reason)
 }
 
-// evictPeer is the idle-reaper entry point. The reason is spelled out because a
-// line reading "(idle)" used to cover every eviction path, including the ones a
-// live session triggers on purpose — which made a teardown race look like a
-// timeout in the field log.
+// evictPeer is the idle-reaper entry point.
 func (p *streamTransport) evictPeer(epoch uint32) {
 	p.evictPeerReason(epoch, "idle-reaper")
 }

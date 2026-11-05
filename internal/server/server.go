@@ -472,11 +472,15 @@ func (s *Server) removePeerSession(peerID, reason string) {
 	ps := s.peerSessions[peerID]
 	if ps != nil {
 		delete(s.peerSessions, peerID)
-		s.dropTransportPeer(peerID)
 	}
 	s.sessMu.Unlock()
+	// Close the smux session before reaping its transport peer. smux writes on
+	// every frame, so dropping the peer's KCP first leaves a live session
+	// addressing a closed transport: Write returns ErrTransportClosed, smux
+	// tears the whole session down, and every stream dies with "closed pipe".
 	if ps != nil {
 		s.closePeerSession(ps, reason)
+		s.dropTransportPeer(peerID)
 	}
 }
 
@@ -492,13 +496,18 @@ func (s *Server) replacePeerSessionForDevice(ps *peerSession, deviceID, sessionI
 	for peerID, current := range s.peerSessions {
 		if current != ps && current.deviceID == deviceID {
 			delete(s.peerSessions, peerID)
-			s.dropTransportPeer(peerID)
 			replaced = append(replaced, current)
 		}
 	}
 	s.sessMu.Unlock()
+	// Order matters: closePeerSession stops the smux writer, and only then is
+	// it safe to drop the transport peer. Doing it the other way round left a
+	// live smux writing into a reaped KCP runtime, which is exactly the
+	// `SendTo unknown peer` -> `muxconn: send failed` -> `closed pipe` chain
+	// a field log shows right after a reconnect.
 	for _, current := range replaced {
 		s.closePeerSession(current, "reconnect")
+		s.dropTransportPeer(current.peerID)
 	}
 	return true
 }
