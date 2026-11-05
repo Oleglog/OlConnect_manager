@@ -280,7 +280,7 @@ func (c *Client) bringUpLink(
 		return fmt.Errorf("smux client: %w", err)
 	}
 
-	control, sid, err := openControlStream(ctx, sess, c.deviceID, c.claims)
+	control, sid, err := openControlStream(ctx, sess, ln, c.deviceID, c.claims)
 	if err != nil {
 		_ = sess.Close()
 		_ = c.conn.Close()
@@ -299,18 +299,19 @@ func (c *Client) bringUpLink(
 	return nil
 }
 
-// peerWaitTimeout bounds how long bringUpLink/tryReopenSession will block
-// waiting for a remote peer before opening smux. This uses the same budget as
-// the handshake path so a missing peer fails quickly instead of hanging before
-// the SOCKS listener is ready.
-const peerWaitTimeout = handshake.DefaultTimeout
-
+// waitForPeer bounds how long bringUpLink/tryReopenSession will block waiting
+// for a remote peer before opening smux. Control-plane transports (vp8channel
+// over an SFU) can take far longer to see the peer's first frame: ICE, two
+// peer connections, KCP and then the SFU's forwarding ramp all happen before
+// a single byte of the peer arrives. A flat 15 s cut the handshake off
+// mid-bring-up on device and produced a 15 s reconnect loop, so the budget
+// follows the same control-plane split as the tunnel ack.
 func waitForPeer(ctx context.Context, ln transport.Transport) error {
 	waiter, ok := ln.(transport.PeerReadyTransport)
 	if !ok {
 		return nil
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, peerWaitTimeout)
+	waitCtx, cancel := context.WithTimeout(ctx, runtime.ConnectAckTimeout(ln))
 	defer cancel()
 	if err := waiter.WaitForPeer(waitCtx); err != nil {
 		return fmt.Errorf("wait for peer: %w", err)
@@ -321,13 +322,18 @@ func waitForPeer(ctx context.Context, ln transport.Transport) error {
 // openControlStream opens stream #1 on sess and performs the handshake.
 // The stream stays open for the lifetime of the smux session and carries
 // post-handshake control messages.
+//
+// The deadline follows the transport: a control-plane carrier needs the same
+// generous window here as for the tunnel ack, because its first frames only
+// start flowing after the SFU's forwarding ramp.
 func openControlStream(
 	ctx context.Context,
 	sess *smux.Session,
+	ln transport.Transport,
 	deviceID string,
 	claims map[string]any,
 ) (*smux.Stream, string, error) {
-	return openControlStreamTimeout(ctx, sess, deviceID, claims, handshake.DefaultTimeout)
+	return openControlStreamTimeout(ctx, sess, deviceID, claims, runtime.ConnectAckTimeout(ln))
 }
 
 func openControlStreamTimeout(
@@ -535,7 +541,7 @@ func (c *Client) tryReopenSession(
 		logger.Warnf("smux re-init failed (attempt %d): %v", attempt, err)
 		return false
 	}
-	control, sid, err := openControlStreamTimeout(ctx, sess, c.deviceID, c.claims, 2*time.Second)
+	control, sid, err := openControlStreamTimeout(ctx, sess, c.deviceID, c.claims, runtime.ConnectAckTimeout(c.ln))
 	if err != nil {
 		logger.Warnf("handshake on reconnect failed (attempt %d): %v", attempt, err)
 		_ = sess.Close()

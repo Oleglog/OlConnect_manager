@@ -763,7 +763,10 @@ func (s *Server) acceptHandshake(ctx context.Context, sess *smux.Session) bool {
 			s.reinstallSession(sess)
 			return false
 		}
-		_ = stream.SetDeadline(time.Now().Add(handshake.DefaultTimeout))
+		// Control-plane carriers need the generous window here too: the client
+		// cannot send its hello until the SFU starts forwarding our frames, and
+		// a flat 15 s deadline cut that off mid-bring-up on device.
+		_ = stream.SetDeadline(time.Now().Add(runtime.ConnectAckTimeout(s.ln)))
 		hello, sid, err := handshake.Server(stream, s.authHook)
 		_ = stream.SetDeadline(time.Time{})
 		if err != nil {
@@ -827,7 +830,10 @@ func (s *Server) acceptPeerHandshake(ps *peerSession) bool {
 			}
 			return false
 		}
-		_ = stream.SetDeadline(time.Now().Add(handshake.DefaultTimeout))
+		// Control-plane carriers need the generous window here too: the client
+		// cannot send its hello until the SFU starts forwarding our frames, and
+		// a flat 15 s deadline cut that off mid-bring-up on device.
+		_ = stream.SetDeadline(time.Now().Add(runtime.ConnectAckTimeout(s.ln)))
 		hello, sid, err := handshake.Server(stream, s.authHook)
 		_ = stream.SetDeadline(time.Time{})
 		if err != nil {
