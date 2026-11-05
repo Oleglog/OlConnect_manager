@@ -663,6 +663,11 @@ async function refreshInstanceUsage(inst) {
 
 function renderInstanceGroups(instances, memberships) {
   const root = el('div', 'space-y-4');
+  // Group numbers are assigned in render order so "01" is always the first
+  // block on screen. A user matches an instance to its group by number first,
+  // shade second — on a monochrome canvas two adjacent greys are hard to tell
+  // apart, a number is not.
+  let groupNumber = 0;
   if (!memberships) {
     root.appendChild(renderInstanceGroup('Все инстансы', instances, null));
     root.appendChild(el('div', 'text-xs text-gray-500', 'Принадлежность к подпискам временно недоступна. Показан общий список.'));
@@ -684,17 +689,18 @@ function renderInstanceGroups(instances, memberships) {
     });
     if (linked.length === 0) return;
     linked.forEach(instance => linkedIDs.add(String(instance.id)));
-    root.appendChild(renderInstanceGroup(group.subscription.name, linked, group.subscription, group.entries));
+    groupNumber += 1;
+    root.appendChild(renderInstanceGroup(group.subscription.name, linked, group.subscription, group.entries, groupNumber));
   });
 
   const unassigned = instances.filter(instance => !linkedIDs.has(String(instance.id)));
   if (unassigned.length > 0) {
-    root.appendChild(renderInstanceGroup('Без подписки', unassigned, null));
+    root.appendChild(renderInstanceGroup('Без подписки', unassigned, null, groupNumber + 1));
   }
   return root;
 }
 
-function renderInstanceGroup(title, instances, subscription, entries) {
+function renderInstanceGroup(title, instances, subscription, entries, groupNumber = 0) {
   const group = el('section', 'instance-group');
   const color = subscription ? subscriptionGroupColor(subscription.slug) : null;
   if (color) {
@@ -706,8 +712,10 @@ function renderInstanceGroup(title, instances, subscription, entries) {
 
   const header = el('div', 'instance-group-header');
   const heading = el('div', 'flex items-center gap-2 min-w-0');
-  if (color) {
-    const marker = el('span', 'instance-group-marker');
+  if (groupNumber > 0) {
+    const marker = el('span', 'instance-group-marker' + (color ? '' : ' is-plain'));
+    marker.textContent = String(groupNumber).padStart(2, '0');
+    marker.title = 'Группа ' + groupNumber;
     heading.appendChild(marker);
   }
   const text = el('div', 'min-w-0');
@@ -729,6 +737,7 @@ function renderInstanceGroup(title, instances, subscription, entries) {
     displayName: aliases.get(String(instance.id)),
     subscription,
     color,
+    groupNumber,
   })));
   group.appendChild(grid);
   return group;
@@ -801,8 +810,7 @@ function cleanInstanceNamePart(value) {
 // stays black & white and the identity never competes with a status colour.
 // Eight steps is the practical ceiling: past that, adjacent steps stop being
 // distinguishable on a dark canvas.
-const GROUP_STEPS = ['#f5f5f5', '#d4d4d4', '#b3b3b3', '#929292',
-                     '#717171', '#555555', '#3d3d3d', '#292929'];
+const GROUP_STEPS = ['#ffffff', '#c9c9c9', '#9a9a9a', '#6e6e6e'];
 
 function subscriptionGroupColor(value) {
   let hash = 0;
@@ -844,7 +852,12 @@ function renderInstanceCard(inst, context = {}) {
   const labelEl = el('div', 'font-semibold truncate');
   labelEl.textContent = displayName;
   const idEl = el('div', 'text-xs text-gray-500');
-  idEl.textContent = '#' + inst.id + ' · ' + (inst.label || '');
+  // The group number is repeated on the card: matching an instance to its
+  // group must not require scrolling back to the header.
+  const groupTag = context.groupNumber
+    ? String(context.groupNumber).padStart(2, '0') + ' · '
+    : '';
+  idEl.textContent = groupTag + '#' + inst.id + ' · ' + (inst.label || '');
   if (inst.name && inst.name !== displayName) idEl.title = 'Имя в конфигурации: ' + inst.name;
   labelWrap.appendChild(labelEl);
   labelWrap.appendChild(idEl);

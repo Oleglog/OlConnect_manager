@@ -155,6 +155,15 @@ body {
   border-color: var(--color-lavender-border);
 }
 
+/* Groups without a subscription (the "Без подписки" bucket) get a numbered
+ * marker too, so the list reads as a continuous 01..N sequence rather than
+ * "some groups have numbers and one does not". */
+.instance-group-marker.is-plain {
+  background: transparent;
+  color: var(--color-ink-muted);
+  border: 1px solid var(--color-hairline-strong);
+}
+
 .instance-group {
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
@@ -175,16 +184,37 @@ body {
   margin-bottom: var(--spacing-md);
 }
 
+/* A group is identified by three redundant cues, not by a colour swatch:
+ *   1. a numeric badge (01, 02, ...) — unambiguous even at low contrast;
+ *   2. a left rail whose brightness steps down the grey scale;
+ *   3. a distinct border weight per group.
+ * Luminance alone is not enough on a dark canvas — two adjacent greys read as
+ * "the same grey" — so the number carries the identity and the shade only
+ * reinforces it. */
 .instance-group-marker {
-  width: 6px;
-  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 22px;
+  padding: 0 6px;
   flex: 0 0 auto;
-  border-radius: 3px;
-  background: var(--instance-group-accent, var(--color-primary));
+  border-radius: var(--rounded-sm);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: #050505;
+  background: var(--instance-group-accent, var(--color-ink));
+}
+
+.instance-group-subscription {
+  border-left: 4px solid var(--instance-group-accent, var(--color-hairline-tertiary));
+  padding-left: calc(var(--spacing-md) - 4px);
 }
 
 .instance-group-subscription .instance-card {
-  border-left: 3px solid var(--instance-group-accent, var(--color-primary));
+  border-left: 1px solid var(--color-hairline);
 }
 
 .section-title {
