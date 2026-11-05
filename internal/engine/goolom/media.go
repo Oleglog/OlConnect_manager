@@ -280,12 +280,23 @@ func (s *Session) sendSetSlots() error {
 	s.wsMu.Lock()
 	defer s.wsMu.Unlock()
 
-	// Goolom only forwards as many remote videos as the subscriber asks for via
-	// setSlots. Request a generous count so each subscriber sees every active
-	// publisher in the room.
-	slots := make([]map[string]int, 0, 8)
-	for range 8 {
-		slots = append(slots, map[string]int{"width": 1280, "height": 720})
+	// The SFU clamps the forwarded stream to the size of the slot the
+	// subscriber asks for. A measured 2026-10-28 sweep in the same room gave
+	// 0.45 MB/s at 608x342 versus 1.15 MB/s at 1920x1080 (2.44x) with no
+	// downside for a pure tunnel, which never renders. The first two slots
+	// carry our stream, so they ask for 1920x1080; the smaller trailing ones
+	// only describe what else we would render if another publisher joined.
+	// This mirrors the geometry in OpenFlux's Telemost carrier — both ends of
+	// the tunnel have to agree on it.
+	geometry := [][2]int{
+		{1920, 1080}, {1920, 1080},
+		{416, 234}, {416, 234},
+		{400, 225}, {400, 225},
+		{288, 162}, {288, 162},
+	}
+	slots := make([]map[string]int, 0, len(geometry))
+	for _, g := range geometry {
+		slots = append(slots, map[string]int{"width": g[0], "height": g[1]})
 	}
 	if err := s.ws.WriteJSON(map[string]any{
 		keyUID: uuid.New().String(),
