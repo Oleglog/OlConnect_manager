@@ -73,8 +73,9 @@ curl -fsSL https://raw.githubusercontent.com/Oleglog/OlConnect_manager/master/se
 
 ## Клиентские приложения
 
-- **Android (OlConnect)**: официальный полнофункциональный клиент [OlConnect Android](https://github.com/Oleglog/OlConnect_client). Поддерживает протоколы `olconnect://` и `openflux://` (с авто-детекцией Yandex/Mail.ru Docs и поддержкой AES-256-GCM ключей `&k=`), QR-коды, подписки, обход блокировок с RFC 792 ICMP Port Unreachable fast TCP fallback, темную тему и per-app routing.
-- **Android (OpenFlux)**: легковесный специализированный клиент [OpenFlux-Android](https://github.com/Oleglog/OpenFlux-Android).
+- **Android (OlConnect)**: официальный полнофункциональный клиент [OlConnect](https://github.com/Oleglog/OlConnect) ([релизы](https://github.com/Oleglog/OlConnect/releases)). Поддерживает протоколы `olconnect://` и `openflux://` (с авто-детекцией Yandex/Mail.ru Docs и поддержкой AES-256-GCM ключей `&k=`), QR-коды, подписки, обход блокировок с RFC 792 ICMP Port Unreachable fast TCP fallback, темную тему и per-app routing.
+- **Android (OpenFlux)**: легковесный специализированный клиент [OpenFlux-Android](https://github.com/Oleglog/OpenFlux-Android) ([релизы](https://github.com/Oleglog/OpenFlux-Android/releases)).
+- **Сторонние клиенты (olcbox и подобные) не поддерживаются.** Формат `olcrtc://...?...@...#<ключ>$<MIMO>` из [docs/uri.md](docs/uri.md) панель больше не генерирует: он был удалён в `2.1.5` (issue #45), потому что спецификация осталась без развития. Панель выдаёт `olconnect://` (TCP-туннель) и `openflux://` (L3), их понимают только клиенты выше. Если вставка ссылки в сторонний клиент не проходит — это ожидаемо, а не баг панели.
 
 ---
 
