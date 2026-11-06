@@ -4,6 +4,7 @@
 
 const API = '/api';
 let creds = JSON.parse(localStorage.getItem('olcrtc_creds') || 'null'); // {username, password}
+let loginNotice = ''; // one-shot message shown on the login screen
 let usagePollTimer = null;
 const latestInstanceUsage = new Map();
 
@@ -44,6 +45,18 @@ async function api(path, opts = {}) {
     creds = null;
     route('/login');
     throw new Error('Unauthorized');
+  }
+  if (res.status === 429) {
+    // The admin answers 429 from the Basic-auth rate limiter, which trips after
+    // a couple of bad credentials and then holds the whole IP for five minutes.
+    // Stale credentials cached in localStorage look exactly like that, so the
+    // user gets a bare "Too Many Requests" in whatever modal was open (issue
+    // #59). Drop the creds, explain, and land on a working login form.
+    localStorage.removeItem('olcrtc_creds');
+    creds = null;
+    loginNotice = 'Слишком много неудачных попыток входа. Подождите 5 минут и войдите снова.';
+    route('/login');
+    throw new Error(loginNotice);
   }
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
@@ -384,6 +397,13 @@ function renderLogin(app) {
   btn.textContent = 'Войти';
 
   const err = el('div', 'text-rose-400 text-sm mt-2 hidden text-center');
+  if (loginNotice) {
+    // Set by the 429 branch in api(): the bounce reason has to survive the
+    // re-render, otherwise the user just sees an empty login form again.
+    err.textContent = loginNotice;
+    err.classList.remove('hidden');
+    loginNotice = '';
+  }
 
   async function submit() {
     err.classList.add('hidden');
