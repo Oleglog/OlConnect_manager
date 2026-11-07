@@ -13,30 +13,25 @@ const (
 	// fake-VP8 wire rate around 1.2 MB/s, which protected some SFUs from bursts
 	// but also throttled real tunnel throughput. Keep the knob for manual safe
 	// mode, but do not limit speed unless the user explicitly configures it.
+	//
+	// Measured starting points for vp8.max_bytes_per_sec (2026-11-07, one client
+	// in the room): Telemost sustains about 24 KB/s delivered at a 50 KB/s
+	// budget with the control RTT under a second, and collapses back into a
+	// 27-42 s control RTT with liveness teardowns at 90-120 KB/s. Both figures
+	// are opt-in only: shipping the 50 KB/s budget by default made the
+	// interactive page load slower than the unpaced default, and a default may
+	// not cost interactivity.
 	defaultMaxBytesPerSec = 0
-
-	// defaultTelemostBytesPerSec is the data budget used for the Telemost
-	// carrier when nothing is configured. Telemost shares one KCP session
-	// between the tunnel data and the control ping/pong, and its SFU loses
-	// roughly half of the packets under load, so an unpaced sender builds a
-	// queue that the probe has to wait behind: measured 2026-11-07, control RTT
-	// went from 226 ms idle to 9-45 s under bulk, four missed pongs tore the
-	// session down mid-transfer, and the achieved rate swung between 3 and
-	// 52 KB/s. At 50 KB/s the same link delivered ~24 KB/s with RTT under 1 s
-	// and no liveness teardown; 90-120 KB/s brought the 27 s RTT and the
-	// teardown back. Raise it with vp8.max_bytes_per_sec if a build is used
-	// against a carrier that can take it.
-	defaultTelemostBytesPerSec = 50_000
 )
 
 // Options tunes the vp8channel transport. Zero values fall back to documented defaults.
 type Options struct {
 	FPS       int
 	BatchSize int
-	// MaxBytesPerSec caps the data rate handed to KCP. Zero means "unset" and
-	// falls back to the package default, and for the Telemost carrier to the
-	// measured budget in defaultTelemostBytesPerSec; a negative value means
-	// explicitly unlimited.
+	// MaxBytesPerSec caps the data rate handed to KCP. Zero means unset, which
+	// keeps the package default (unlimited); a negative value means explicitly
+	// unlimited as well, so an operator can turn a budget off from a config that
+	// inherited one. The measured starting points live in defaultMaxBytesPerSec.
 	MaxBytesPerSec int
 	// MaxSampleBytes caps one sample (one VP8 frame on the wire). Zero keeps
 	// the package default.

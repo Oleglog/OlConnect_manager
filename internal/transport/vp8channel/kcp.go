@@ -30,13 +30,14 @@ const (
 
 	// Send/receive window in segments. The window is the queue the control
 	// probe has to wait behind, so it is one half of the latency/throughput
-	// trade-off and the data budget is the other. Measured 2026-11-07 over
-	// Telemost with a 50 KB/s budget: 768 segments left the probe waiting
-	// 32 s, 384 and 128 were worse on both counts (a session died by liveness
-	// in each), 192 held the control RTT under 570 ms with no liveness teardown
-	// and 23.8 KB/s delivered. The receive window stays generous so the peer is
-	// never the bottleneck.
-	kcpSndWnd = 192
+	// trade-off and the data budget is the other. The transport ships the large
+	// default: a 192-segment window with a 50 KB/s budget was measured 2026-11-07
+	// to hold the control RTT under a second in one session, but in an A/B on the
+	// same stand it lost the session to liveness twice and left the interactive
+	// page load at 9-20 s, while 768 with no budget opened example.com in 1-2 s
+	// with zero liveness teardowns. A default may not cost interactivity, so the
+	// small window stays opt-in via vp8.sndwnd.
+	kcpSndWnd = 768
 	kcpRcvWnd = 1024
 
 	// Length prefix for our message framing on top of KCP stream mode.
