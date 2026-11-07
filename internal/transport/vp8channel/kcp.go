@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 
 	kcp "github.com/xtaci/kcp-go/v5"
 )
@@ -55,6 +56,17 @@ const (
 // ErrKCPMessageTooLarge is returned by send when the message exceeds
 // kcpMaxMessage.
 var ErrKCPMessageTooLarge = errors.New("vp8channel: kcp message exceeds maximum size")
+
+// Application-level send counters. appSendBytes is what the tunnel actually
+// asked the transport to move, before KCP fragmentation, batching and
+// retransmission; wireOutBytes (kcpconn.go) is what went out on the wire. The
+// ratio names a stalled sender versus a retransmit storm without needing KCP
+// internals.
+//nolint:gochecknoglobals // diagnostics counters, read by the stats line
+var (
+	appSendPkts  atomic.Int64
+	appSendBytes atomic.Int64
+)
 
 // kcpRuntime owns the KCP session and the goroutine that pumps reassembled
 // messages from KCP up to cfg.OnData.
@@ -164,6 +176,8 @@ func (r *kcpRuntime) send(msg []byte) error {
 	if _, err := r.sess.Write(buf); err != nil {
 		return fmt.Errorf("kcp write framed message: %w", err)
 	}
+	appSendPkts.Add(1)
+	appSendBytes.Add(int64(len(msg)))
 	return nil
 }
 

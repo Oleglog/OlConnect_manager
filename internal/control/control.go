@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/openlibrecommunity/olcrtc/internal/framing"
+	"github.com/openlibrecommunity/olcrtc/internal/logger"
 )
 
 const (
@@ -284,9 +285,13 @@ func (s *state) handlePong(msg Message) {
 	if !ok || s.cfg.OnPong == nil {
 		return
 	}
+	rtt := now.Sub(sent)
+	// The tunnel RTT bounds every request/response exchange on this link and
+	// is the first thing to check when goodput collapses but nothing is lost.
+	logger.Verbosef("control pong seq=%d rtt=%s pending=%d", msg.Seq, rtt.Round(time.Millisecond), len(s.pending))
 	s.cfg.OnPong(Health{
 		Seq:      msg.Seq,
-		RTT:      now.Sub(sent),
+		RTT:      rtt,
 		LastSeen: now,
 	})
 }

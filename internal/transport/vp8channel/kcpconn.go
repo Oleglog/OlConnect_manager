@@ -27,10 +27,21 @@ var wireCRCTable = crc32.MakeTable(crc32.Castagnoli) //nolint:gochecknoglobals /
 // retransmits it. That makes a corruption-heavy path look exactly like a
 // loss-heavy one, so count both reasons the inbound queue discards a packet:
 // crcDrops (carrier mangled the bytes) and queueDrops (reader fell behind).
+//
+// The wire counters split "we never sent it" from "the SFU dropped it": every
+// packet KCP hands to the carrier goes through WriteTo exactly once, including
+// retransmissions, so wireOutPkts/Bytes is the true egress volume and the
+// peer's rtpPkts/Bytes is what survived the SFU. Comparing the two names the
+// lossy hop instead of guessing.
 //nolint:gochecknoglobals // diagnostics counters, read by the stats line
 var (
-	crcDrops   atomic.Int64
-	queueDrops atomic.Int64
+	crcDrops      atomic.Int64
+	queueDrops    atomic.Int64
+	wireOutPkts   atomic.Int64
+	wireOutBytes  atomic.Int64
+	wireInPkts    atomic.Int64
+	wireInBytes   atomic.Int64
+	wireInBatches atomic.Int64 // inbound carrier frames that carried >1 KCP packet
 )
 
 func fakeUDPAddr() *net.UDPAddr {
@@ -92,6 +103,8 @@ func (c *kcpConn) deliver(payload []byte) {
 	copy(cp, body)
 	select {
 	case c.in <- cp:
+		wireInPkts.Add(1)
+		wireInBytes.Add(int64(len(body)))
 	case <-c.closed:
 	default:
 		queueDrops.Add(1)
@@ -150,6 +163,8 @@ func (c *kcpConn) WriteTo(p []byte, _ net.Addr) (int, error) {
 
 	select {
 	case c.out <- buf:
+		wireOutPkts.Add(1)
+		wireOutBytes.Add(int64(len(p)))
 		return len(p), nil
 	case <-c.closed:
 		return 0, net.ErrClosed

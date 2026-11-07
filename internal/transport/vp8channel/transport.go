@@ -49,6 +49,12 @@ const (
 	// above anything this carrier delivers.
 	maxSampleBytes = 8 * 1024
 
+	// singleRTPPacket is the largest sample that still fits one RTP packet for
+	// a 1200-byte path MTU (pion payload plus the VP8 payload descriptor). A
+	// fragmented sample survives only if every one of its packets does, so the
+	// fragmentation ratio is the number to watch when goodput collapses.
+	singleRTPPacket = 1180
+
 	// outboundQueueSize bounds KCP packets waiting for the paced writer. Sized
 	// to a couple of send windows so KCP's flush never blocks (a blocked
 	// WriteTo would stall KCP's update loop and delay ACKs); the paced writer
@@ -197,21 +203,31 @@ type streamTransport struct {
 	// Receive-path diagnostics. peerFrames only counts frames that were
 	// parsed, de-batched and matched to our binding token, so a tunnel that
 	// carries nothing cannot say WHERE the bytes went. These counters split
-	// the inbound path into its stages: RTP packets the SFU actually
-	// delivered to us (rtpPkts), reassembled VP8 frames (rpFrames), frames the
-	// reassembler threw away (rpDrops), reorder jumps that skipped a hole,
-	// frames rejected by the epoch-header CRC / token / self checks, and
-	// WriteSample calls the local track refused (txWriteErrors: pion refuses
-	// when the transceiver has no bound sender, i.e. the SFU dropped our
-	// subscription, which no other counter reveals).
+	// the inbound path into its stages: RTP packets and bytes the SFU actually
+	// delivered (rtpPkts/rtpBytes), reassembled VP8 frames and their bytes
+	// (rpFrames/rpBytes), frames the reassembler threw away (rpDrops), reorder
+	// jumps that skipped a hole, frames rejected by the epoch-header CRC /
+	// token / self checks, and WriteSample calls the local track refused.
+	// txWriteErrors matters on its own: pion refuses when the transceiver has
+	// no bound sender, i.e. the SFU dropped our subscription, which no other
+	// counter reveals.
 	rtpPkts       atomic.Int64
+	rtpBytes      atomic.Int64
 	rpFrames      atomic.Int64
+	rpBytes       atomic.Int64
 	rpDrops       atomic.Int64
 	reorderJumps  atomic.Int64
 	crcFails      atomic.Int64
 	tokenDrops    atomic.Int64
 	selfDrops     atomic.Int64
 	txWriteErrors atomic.Int64
+	// maxSample is the largest sample handed to the track and fragSamples the
+	// number that needed more than one RTP packet. A sample that fragments has
+	// all-or-nothing survival at the peer: one lost packet discards the whole
+	// frame at the reassembler, so this pair explains a goodput collapse that
+	// packet counters alone cannot.
+	maxSample   atomic.Int64
+	fragSamples atomic.Int64
 }
 
 // New creates a vp8channel transport backed by a carrier engine.
@@ -298,6 +314,14 @@ func newStreamTransport(
 	}
 	if perTickBytes > maxSampleBytes {
 		perTickBytes = maxSampleBytes
+	}
+	if opts.MaxSampleBytes > 0 && perTickBytes > opts.MaxSampleBytes {
+		perTickBytes = opts.MaxSampleBytes
+	}
+	// A sample below one RTP payload's worth of KCP framing cannot be emitted at
+	// all, so keep room for the epoch header plus a minimal KCP segment.
+	if perTickBytes < epochHdrLen+kcpLenPrefix {
+		perTickBytes = epochHdrLen + kcpLenPrefix
 	}
 
 	tr := &streamTransport{
@@ -677,6 +701,12 @@ func (p *streamTransport) writeTrackSample(data []byte) {
 
 	p.txSamples.Add(1)
 	p.txBytes.Add(int64(len(data)))
+	if size := int64(len(data)); size > p.maxSample.Load() {
+		p.maxSample.Store(size)
+	}
+	if len(data) > singleRTPPacket {
+		p.fragSamples.Add(1)
+	}
 	if err := p.track.WriteSample(media.Sample{Data: data, Duration: dur}); err != nil {
 		// A rejected write is not "sent bytes": it never reaches the wire, and
 		// the failure is invisible in every other counter. Say it once per
@@ -692,18 +722,25 @@ func (p *streamTransport) writeTrackSample(data []byte) {
 // repeatedly shipped without enough evidence to name a direction; this line
 // answers "did frames arrive, did we write to the track" from a field log.
 //
-// The RX stage counters matter because they split "the SFU never sent it" from
-// "we threw it away": rtp counts packets handed to us by the subscriber PC,
-// frames counts reassembled VP8 frames, rpDrop counts frames discarded on a
-// reassembly gap, jump counts skipped RTP holes, crc counts frames whose
-// epoch-header CRC did not match (carrier corrupted the bytes), and kd counts
-// KCP packets dropped by the wire CRC inside kcpConn.
+// The stage counters split "the SFU never sent it" from "we threw it away" and
+// "we never sent it". RX: rtp is what the subscriber PC actually received
+// (packets and payload bytes), frames what survived reassembly (with bytes),
+// rpDrop frames discarded on a reassembly gap, jump skipped RTP holes, crc
+// frames whose epoch-header CRC did not match, kIn KCP packets accepted from
+// the wire, kcpDrop/kqDrop those the wire CRC or the inbound queue discarded.
+// TX: samples/sampleBytes are WriteSample calls, maxS/fragS show how large one
+// sample got and how many spanned more than one RTP packet, wireOut is every
+// KCP packet handed to the carrier (retransmits included) and app is what the
+// tunnel actually asked us to send — wireOut much larger than app is a
+// retransmit storm, app much larger than wireOut is a stalled sender.
 func (p *streamTransport) statsLoop() {
 	defer close(p.statsDone)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	var lastRx, lastTx, lastRxB, lastTxB int64
-	var lastRTP, lastFrame, lastDrop, lastJump, lastCRC, lastTok, lastSelf, lastKD, lastQD, lastWE int64
+	var lastRTP, lastRTPB, lastFrame, lastFrameB, lastDrop, lastJump int64
+	var lastCRC, lastTok, lastSelf, lastKD, lastQD, lastWE int64
+	var lastKIn, lastKInB, lastWOut, lastWOutB, lastApp, lastAppB int64
 	for {
 		select {
 		case <-p.closeCh:
@@ -711,31 +748,46 @@ func (p *streamTransport) statsLoop() {
 		case <-ticker.C:
 			rx, tx := p.rxFrames.Load(), p.txSamples.Load()
 			rxB, txB := p.rxBytes.Load(), p.txBytes.Load()
-			rtp, frames := p.rtpPkts.Load(), p.rpFrames.Load()
+			rtp, rtpB := p.rtpPkts.Load(), p.rtpBytes.Load()
+			frames, frameB := p.rpFrames.Load(), p.rpBytes.Load()
 			drops, jumps := p.rpDrops.Load(), p.reorderJumps.Load()
 			crc, tok, self := p.crcFails.Load(), p.tokenDrops.Load(), p.selfDrops.Load()
-			kd, qd := crcDrops.Load(), queueDrops.Load()
-			we := p.txWriteErrors.Load()
+			kd, qd, we := crcDrops.Load(), queueDrops.Load(), p.txWriteErrors.Load()
+			kIn, kInB := wireInPkts.Load(), wireInBytes.Load()
+			wOut, wOutB := wireOutPkts.Load(), wireOutBytes.Load()
+			app, appB := appSendPkts.Load(), appSendBytes.Load()
+			maxS, fragS := p.maxSample.Load(), p.fragSamples.Load()
 			if !logger.IsVerbose() {
 				lastRx, lastTx, lastRxB, lastTxB = rx, tx, rxB, txB
-				lastRTP, lastFrame, lastDrop = rtp, frames, drops
-				lastJump, lastCRC, lastTok, lastSelf = jumps, crc, tok, self
+				lastRTP, lastRTPB, lastFrame, lastFrameB = rtp, rtpB, frames, frameB
+				lastDrop, lastJump, lastCRC, lastTok, lastSelf = drops, jumps, crc, tok, self
 				lastKD, lastQD, lastWE = kd, qd, we
+				lastKIn, lastKInB, lastWOut, lastWOutB = kIn, kInB, wOut, wOutB
+				lastApp, lastAppB = app, appB
 				continue
 			}
 			logger.Infof("[VP8-TRAFFIC] peerFrames=%d(+%d) peerBytes=%d(+%d) samples=%d(+%d) sampleBytes=%d(+%d)",
 				rx, rx-lastRx, rxB, rxB-lastRxB, tx, tx-lastTx, txB, txB-lastTxB)
-			logger.Infof("[VP8-RX] rtp=%d(+%d) frames=%d(+%d) rpDrop=%d(+%d) jump=%d(+%d) "+
-				"crc=%d(+%d) tok=%d(+%d) self=%d(+%d) kcpDrop=%d(+%d) kqDrop=%d(+%d)",
-				rtp, rtp-lastRTP, frames, frames-lastFrame, drops, drops-lastDrop,
-				jumps, jumps-lastJump, crc, crc-lastCRC, tok, tok-lastTok, self, self-lastSelf,
-				kd, kd-lastKD, qd, qd-lastQD)
-			logger.Infof("[VP8-TX] writeErrors=%d(+%d) localEpoch=0x%08x peerEpoch=0x%08x peers=%d",
-				we, we-lastWE, p.localEpochValue(), p.peerEpoch.Load(), p.peerCount())
+			logger.Infof("[VP8-RX] rtp=%d(+%d) rtpB=%d(+%d) frames=%d(+%d) frameB=%d(+%d) "+
+				"rpDrop=%d(+%d) jump=%d(+%d)",
+				rtp, rtp-lastRTP, rtpB, rtpB-lastRTPB, frames, frames-lastFrame,
+				frameB, frameB-lastFrameB, drops, drops-lastDrop, jumps, jumps-lastJump)
+			logger.Infof("[VP8-RX2] crc=%d(+%d) tok=%d(+%d) self=%d(+%d) kIn=%d(+%d) kInB=%d(+%d) "+
+				"kcpDrop=%d(+%d) kqDrop=%d(+%d)",
+				crc, crc-lastCRC, tok, tok-lastTok, self, self-lastSelf,
+				kIn, kIn-lastKIn, kInB, kInB-lastKInB, kd, kd-lastKD, qd, qd-lastQD)
+			logger.Infof("[VP8-TX] app=%d(+%d) appB=%d(+%d) wireOut=%d(+%d) wireOutB=%d(+%d) "+
+				"maxS=%d fragS=%d writeErrors=%d(+%d)",
+				app, app-lastApp, appB, appB-lastAppB, wOut, wOut-lastWOut, wOutB, wOutB-lastWOutB,
+				maxS, fragS, we, we-lastWE)
+			logger.Infof("[VP8-TX2] localEpoch=0x%08x peerEpoch=0x%08x peers=%d",
+				p.localEpochValue(), p.peerEpoch.Load(), p.peerCount())
 			lastRx, lastTx, lastRxB, lastTxB = rx, tx, rxB, txB
-			lastRTP, lastFrame, lastDrop = rtp, frames, drops
-			lastJump, lastCRC, lastTok, lastSelf = jumps, crc, tok, self
+			lastRTP, lastRTPB, lastFrame, lastFrameB = rtp, rtpB, frames, frameB
+			lastDrop, lastJump, lastCRC, lastTok, lastSelf = drops, jumps, crc, tok, self
 			lastKD, lastQD, lastWE = kd, qd, we
+			lastKIn, lastKInB, lastWOut, lastWOutB = kIn, kInB, wOut, wOutB
+			lastApp, lastAppB = app, appB
 		}
 	}
 }
@@ -1084,6 +1136,7 @@ func (p *streamTransport) readVP8Track(track *webrtc.TrackRemote) {
 			continue
 		}
 		p.rtpPkts.Add(1)
+		p.rtpBytes.Add(int64(n))
 
 		for _, ordered := range reorder.push(pkt) {
 			frame := state.processRTPPacket(ordered)
@@ -1091,6 +1144,7 @@ func (p *streamTransport) readVP8Track(track *webrtc.TrackRemote) {
 				continue
 			}
 			p.rpFrames.Add(1)
+			p.rpBytes.Add(int64(len(frame)))
 			p.handleIncomingFrame(frame)
 		}
 		if reorder.jumps != seenJumps {
@@ -1374,6 +1428,7 @@ func splitKCPPayload(payload []byte, deliver func([]byte)) {
 		deliver(payload)
 		return
 	}
+	wireInBatches.Add(1)
 
 	rest := payload[len(kcpBatchMagic):]
 	for len(rest) > 0 {

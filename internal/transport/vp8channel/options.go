@@ -23,6 +23,9 @@ type Options struct {
 	// MaxBytesPerSec caps the wire byte-rate fed to the video track. Zero means
 	// unlimited unless the package default is changed by a build.
 	MaxBytesPerSec int
+	// MaxSampleBytes caps one sample (one VP8 frame on the wire). Zero keeps
+	// the package default.
+	MaxSampleBytes int
 }
 
 // TransportOptions marks Options as belonging to the transport options family.

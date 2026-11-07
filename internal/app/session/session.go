@@ -165,6 +165,9 @@ type VideoConfig struct {
 type VP8Config struct {
 	FPS       int
 	BatchSize int
+	// MaxSampleBytes bounds one sample (= one VP8 frame on the wire). Zero
+	// keeps the transport default.
+	MaxSampleBytes int
 }
 
 // SEIConfig holds tunables for the seichannel transport.
