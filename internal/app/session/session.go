@@ -173,6 +173,9 @@ type VP8Config struct {
 	MTU int
 	// EnableCC turns KCP's loss-based congestion control on.
 	EnableCC bool
+	// MaxBytesPerSec caps the data rate fed to the track (keepalives excluded).
+	// Zero means unlimited.
+	MaxBytesPerSec int
 }
 
 // SEIConfig holds tunables for the seichannel transport.

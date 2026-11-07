@@ -155,6 +155,20 @@ type streamTransport struct {
 	segMTU        int
 	enableCC      bool
 
+	// Data-path token bucket. The publisher writes into one KCP session that
+	// also carries the control ping/pong, so an unpaced writer builds a
+	// standing queue and the control probe ends up behind seconds of bulk data:
+	// measured 2026-11-07, control RTT went from 226 ms idle to 9-19 s under a
+	// bulk transfer, four missed pongs later the session was torn down and the
+	// transfer died mid-flight. Capping the data rate keeps that queue short.
+	// Keepalives and keyframes are deliberately not gated: they are ~32 bytes
+	// and they are what keeps the SFU forwarding the track.
+	limMu     sync.Mutex
+	limRate   int64 // bytes per second; 0 disables the cap
+	limTokens int64
+	limCap    int64
+	limLast   time.Time
+
 	// writeMu serializes WriteSample across the keepalive writerLoop and every
 	// per-peer writer pump, and guards lastWrite so the shared track's RTP
 	// timestamp advances by real elapsed time rather than by the number of
@@ -356,6 +370,16 @@ func newStreamTransport(
 		peerStop:      make(map[uint32]chan struct{}),
 		peerSeen:         make(map[uint32]*atomic.Int64),
 		peerRestartGrace: defaultPeerRestartGrace,
+	}
+	if byteRate > 0 {
+		tr.limRate = int64(byteRate)
+		// A tenth of a second of budget absorbs one scheduling hiccup without
+		// letting a burst build. At least two full samples so a sample can
+		// always be admitted.
+		tr.limCap = max(tr.limRate/10, 2*int64(maxSampleBytes))
+		tr.limTokens = tr.limCap
+		tr.limLast = time.Now()
+		logger.Infof("vp8channel: data rate capped at %d B/s (burst %d B)", tr.limRate, tr.limCap)
 	}
 
 	// In single-peer mode, confirm the peer epoch on first successful KCP
@@ -818,6 +842,62 @@ func (p *streamTransport) peerCount() int {
 	return len(p.peers)
 }
 
+// writeDataSample hands one data sample to the track after waiting for the
+// configured data budget. It applies back-pressure all the way up: the writer
+// stops draining `outbound`, KCP's WriteTo blocks, the send window fills and
+// smux stops reading from the tunnel. That is intentional — the alternative is
+// a standing queue that the control probe has to wait behind.
+func (p *streamTransport) writeDataSample(sample []byte) {
+	if !p.waitForBudget(len(sample)) {
+		return
+	}
+	p.writeTrackSample(sample)
+}
+
+// waitForBudget blocks until n bytes fit in the data budget and reports false
+// if the transport closed while waiting.
+func (p *streamTransport) waitForBudget(n int) bool {
+	if p.limRate <= 0 {
+		return true
+	}
+	need := int64(n)
+	for {
+		p.limMu.Lock()
+		now := time.Now()
+		if elapsed := now.Sub(p.limLast); elapsed > 0 {
+			p.limTokens += int64(elapsed) * p.limRate / int64(time.Second)
+			if p.limTokens > p.limCap {
+				p.limTokens = p.limCap
+			}
+			p.limLast = now
+		} else {
+			// First call after construction (or a clock step back): restart the
+			// accounting instead of spinning on a zero interval.
+			p.limLast = now
+		}
+		if p.limTokens >= need {
+			p.limTokens -= need
+			p.limMu.Unlock()
+			return true
+		}
+		deficit := need - p.limTokens
+		p.limMu.Unlock()
+
+		wait := time.Duration(deficit * int64(time.Second) / p.limRate)
+		if wait < time.Millisecond {
+			wait = time.Millisecond
+		}
+		if wait > 50*time.Millisecond {
+			wait = 50 * time.Millisecond
+		}
+		select {
+		case <-p.closeCh:
+			return false
+		case <-time.After(wait):
+		}
+	}
+}
+
 func (p *streamTransport) writerLoop() {
 	defer close(p.writerDone)
 
@@ -844,7 +924,8 @@ func (p *streamTransport) writerLoop() {
 			// bytes queued. Coalescing back-to-back frames here only adds up
 			// to one frameInterval of latency per message for zero wire
 			// savings — the batcher drains the queue non-blockingly below.
-			p.writeTrackSample(p.batchSample(frame, p.perTickBytes))
+			// The data budget, not the tick, is what bounds the rate.
+			p.writeDataSample(p.batchSample(frame, p.perTickBytes))
 			idleTicks = 0
 			if !time.Now().Before(keyframeAt) {
 				keyframeAt = time.Now().Add(2 * time.Second)
@@ -871,9 +952,13 @@ func (p *streamTransport) writerLoop() {
 				keyframeAt = time.Now().Add(2 * time.Second)
 				hdr := p.epochHeader()
 				sample = hdr[:]
+				// A keepalive is not data: it stays outside the budget so the
+				// SFU keeps seeing frames while the data budget is exhausted.
+				p.writeTrackSample(sample)
+				continue
 			}
 
-			p.writeTrackSample(sample)
+			p.writeDataSample(sample)
 		}
 	}
 }
@@ -1358,7 +1443,7 @@ func (p *streamTransport) peerWriterPump(stop chan struct{}, out chan []byte) {
 			if !ok {
 				return
 			}
-			p.writeTrackSample(p.batchSampleFrom(out, frame, p.perTickBytes))
+			p.writeDataSample(p.batchSampleFrom(out, frame, p.perTickBytes))
 		case <-p.closeCh:
 			return
 		case <-stop:

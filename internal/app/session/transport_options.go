@@ -32,6 +32,7 @@ func buildTransportOptions(cfg Config) transport.Options {
 			MaxSampleBytes: cfg.VP8.MaxSampleBytes,
 			MTU:            cfg.VP8.MTU,
 			EnableCC:       cfg.VP8.EnableCC,
+			MaxBytesPerSec: cfg.VP8.MaxBytesPerSec,
 		}
 	case transportSEI:
 		return seichannel.Options{

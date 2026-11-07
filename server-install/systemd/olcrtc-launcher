@@ -29,6 +29,10 @@
 #                                       whether a sample fits in one RTP packet.
 #   OLCRTC_VP8_MAX_SAMPLE    optional: cap on one sample in bytes
 #   OLCRTC_VP8_CC            optional: set to 1 to enable KCP congestion control
+#   OLCRTC_VP8_MAX_BYTES_PER_SEC optional: cap the data rate fed to the track
+#                                       (keepalives excluded). A bounded queue is
+#                                       what keeps the control probe responsive
+#                                       under bulk load.
 #   OLCRTC_VP8_BATCH         optional: VP8 batch size (default 64, only for vp8channel)
 #   OLCRTC_SEI_FPS           optional: SEI FPS (default 60)
 #   OLCRTC_SEI_BATCH         optional: SEI batch size (default 64)
@@ -361,6 +365,9 @@ EOF
     fi
     if [ -n "${OLCRTC_VP8_CC:-}" ] && [ "${OLCRTC_VP8_CC}" != "0" ] && [ "${OLCRTC_VP8_CC}" != "false" ]; then
         echo "  cc: true" >> "$CONFIG_FILE"
+    fi
+    if [ -n "${OLCRTC_VP8_MAX_BYTES_PER_SEC:-}" ]; then
+        echo "  max_bytes_per_sec: ${OLCRTC_VP8_MAX_BYTES_PER_SEC}" >> "$CONFIG_FILE"
     fi
 fi
 
