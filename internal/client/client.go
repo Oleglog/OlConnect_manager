@@ -190,7 +190,7 @@ func RunWithReady(ctx context.Context, cfg Config, onReady func()) error {
 	// that bringUpLink hadn't populated yet.
 	defer c.shutdown()
 
-	if err := c.bringUpLink(runCtx, cfg, cancel); err != nil {
+	if err := c.bringUpWithRetry(runCtx, cfg, cancel); err != nil {
 		return err
 	}
 
@@ -213,12 +213,61 @@ func RunWithReady(ctx context.Context, cfg Config, onReady func()) error {
 	return nil
 }
 
-func (c *Client) bringUpLink(
+// bringUpAttempts bounds the initial bring-up retries. A single lost frame on
+// a lossy SFU video carrier used to end the process: the handshake reader saw
+// a different message than SERVER_WELCOME (field log: "handshake client:
+// unexpected handshake message: got CONTROL_PING") and Run returned the error,
+// so the SOCKS listener never came up and nothing retried. Frame loss at the
+// carrier layer is normal and recoverable, so retry the bring-up; only a real
+// rejection from the server is fatal.
+const (
+	bringUpAttempts   = 5
+	bringUpRetryDelay = time.Second
+)
+
+// fatalBringUpError reports whether retrying cannot help: the server answered
+// and refused us, or we disagree about the protocol.
+func fatalBringUpError(err error) bool {
+	return errors.Is(err, handshake.ErrRejected) ||
+		errors.Is(err, handshake.ErrProtocolVersion)
+}
+
+func (c *Client) bringUpWithRetry(
 	ctx context.Context,
 	cfg Config,
 	cancel context.CancelFunc,
 ) error {
-	// WatchConnection starts below, before the handshake completes, so a
+	delay := bringUpRetryDelay
+	var last error
+	for attempt := 1; attempt <= bringUpAttempts; attempt++ {
+		last = c.bringUpLink(ctx, cfg, cancel)
+		if last == nil {
+			return nil
+		}
+		if fatalBringUpError(last) || ctx.Err() != nil {
+			return last
+		}
+		logger.Warnf("client bring-up attempt=%d/%d failed: %v", attempt, bringUpAttempts, last)
+		// Drop whatever the failed attempt left behind so the next attempt
+		// builds a fresh carrier instead of queueing on a half-open one.
+		c.shutdown()
+		select {
+		case <-ctx.Done():
+			return last
+		case <-time.After(delay):
+		}
+		if delay < 8*bringUpRetryDelay {
+			delay *= 2
+		}
+	}
+	return last
+}
+
+func (c *Client) bringUpLink(
+	ctx context.Context,
+	cfg Config,
+	cancel context.CancelFunc,
+) error {	// WatchConnection starts below, before the handshake completes, so a
 	// mid-handshake reconnect can race this call. handleReconnect takes the
 	// same mutex; without serializing, it can install a fresh working session
 	// via its retry loop while this call is still in flight, and then be

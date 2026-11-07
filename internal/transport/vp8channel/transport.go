@@ -182,6 +182,25 @@ type streamTransport struct {
 	txSamples atomic.Int64
 	txBytes   atomic.Int64
 	statsDone chan struct{}
+
+	// Receive-path diagnostics. peerFrames only counts frames that were
+	// parsed, de-batched and matched to our binding token, so a tunnel that
+	// carries nothing cannot say WHERE the bytes went. These counters split
+	// the inbound path into its stages: RTP packets the SFU actually
+	// delivered to us (rtpPkts), reassembled VP8 frames (rpFrames), frames the
+	// reassembler threw away (rpDrops), reorder jumps that skipped a hole,
+	// frames rejected by the epoch-header CRC / token / self checks, and
+	// WriteSample calls the local track refused (txWriteErrors: pion refuses
+	// when the transceiver has no bound sender, i.e. the SFU dropped our
+	// subscription, which no other counter reveals).
+	rtpPkts       atomic.Int64
+	rpFrames      atomic.Int64
+	rpDrops       atomic.Int64
+	reorderJumps  atomic.Int64
+	crcFails      atomic.Int64
+	tokenDrops    atomic.Int64
+	selfDrops     atomic.Int64
+	txWriteErrors atomic.Int64
 }
 
 // New creates a vp8channel transport backed by a carrier engine.
@@ -644,21 +663,33 @@ func (p *streamTransport) writeTrackSample(data []byte) {
 
 	p.txSamples.Add(1)
 	p.txBytes.Add(int64(len(data)))
-	_ = p.track.WriteSample(media.Sample{
-		Data:     data,
-		Duration: dur,
-	})
+	if err := p.track.WriteSample(media.Sample{Data: data, Duration: dur}); err != nil {
+		// A rejected write is not "sent bytes": it never reaches the wire, and
+		// the failure is invisible in every other counter. Say it once per
+		// hundred so a log stays readable.
+		if n := p.txWriteErrors.Add(1); n <= 5 || n%100 == 0 {
+			logger.Infof("vp8channel: WriteSample refused #%d (%d bytes): %v", n, len(data), err)
+		}
+	}
 }
 
 // statsLoop emits the directional counters every 5s in verbose mode. A tunnel
 // that builds and then moves zero bytes is the one failure this transport has
 // repeatedly shipped without enough evidence to name a direction; this line
 // answers "did frames arrive, did we write to the track" from a field log.
+//
+// The RX stage counters matter because they split "the SFU never sent it" from
+// "we threw it away": rtp counts packets handed to us by the subscriber PC,
+// frames counts reassembled VP8 frames, rpDrop counts frames discarded on a
+// reassembly gap, jump counts skipped RTP holes, crc counts frames whose
+// epoch-header CRC did not match (carrier corrupted the bytes), and kd counts
+// KCP packets dropped by the wire CRC inside kcpConn.
 func (p *streamTransport) statsLoop() {
 	defer close(p.statsDone)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	var lastRx, lastTx, lastRxB, lastTxB int64
+	var lastRTP, lastFrame, lastDrop, lastJump, lastCRC, lastTok, lastSelf, lastKD, lastQD, lastWE int64
 	for {
 		select {
 		case <-p.closeCh:
@@ -666,15 +697,40 @@ func (p *streamTransport) statsLoop() {
 		case <-ticker.C:
 			rx, tx := p.rxFrames.Load(), p.txSamples.Load()
 			rxB, txB := p.rxBytes.Load(), p.txBytes.Load()
+			rtp, frames := p.rtpPkts.Load(), p.rpFrames.Load()
+			drops, jumps := p.rpDrops.Load(), p.reorderJumps.Load()
+			crc, tok, self := p.crcFails.Load(), p.tokenDrops.Load(), p.selfDrops.Load()
+			kd, qd := crcDrops.Load(), queueDrops.Load()
+			we := p.txWriteErrors.Load()
 			if !logger.IsVerbose() {
 				lastRx, lastTx, lastRxB, lastTxB = rx, tx, rxB, txB
+				lastRTP, lastFrame, lastDrop = rtp, frames, drops
+				lastJump, lastCRC, lastTok, lastSelf = jumps, crc, tok, self
+				lastKD, lastQD, lastWE = kd, qd, we
 				continue
 			}
 			logger.Infof("[VP8-TRAFFIC] peerFrames=%d(+%d) peerBytes=%d(+%d) samples=%d(+%d) sampleBytes=%d(+%d)",
 				rx, rx-lastRx, rxB, rxB-lastRxB, tx, tx-lastTx, txB, txB-lastTxB)
+			logger.Infof("[VP8-RX] rtp=%d(+%d) frames=%d(+%d) rpDrop=%d(+%d) jump=%d(+%d) "+
+				"crc=%d(+%d) tok=%d(+%d) self=%d(+%d) kcpDrop=%d(+%d) kqDrop=%d(+%d)",
+				rtp, rtp-lastRTP, frames, frames-lastFrame, drops, drops-lastDrop,
+				jumps, jumps-lastJump, crc, crc-lastCRC, tok, tok-lastTok, self, self-lastSelf,
+				kd, kd-lastKD, qd, qd-lastQD)
+			logger.Infof("[VP8-TX] writeErrors=%d(+%d) localEpoch=0x%08x peerEpoch=0x%08x peers=%d",
+				we, we-lastWE, p.localEpochValue(), p.peerEpoch.Load(), p.peerCount())
 			lastRx, lastTx, lastRxB, lastTxB = rx, tx, rxB, txB
+			lastRTP, lastFrame, lastDrop = rtp, frames, drops
+			lastJump, lastCRC, lastTok, lastSelf = jumps, crc, tok, self
+			lastKD, lastQD, lastWE = kd, qd, we
 		}
 	}
+}
+
+// peerCount reports how many per-epoch KCP sessions exist (multi-peer mode).
+func (p *streamTransport) peerCount() int {
+	p.peersMu.RLock()
+	defer p.peersMu.RUnlock()
+	return len(p.peers)
 }
 
 func (p *streamTransport) writerLoop() {
@@ -829,6 +885,16 @@ func (p *streamTransport) drainTrack(track *webrtc.TrackRemote) {
 
 const reorderWindow = 256
 
+// reorderHoldTimeout bounds how long the reassembly waits for one missing RTP
+// packet before skipping it. Without it the only escape is the packet-count
+// bound above: a single lost packet froze nextSeq until reorderWindow packets
+// had piled up, which at the tunnel's real frame cadence (~10-12 fps) is
+// ~21 seconds of blackout per loss, released as one burst - the field symptom
+// was a tunnel that froze for tens of seconds and then flushed a burst. The
+// SFU's NACK-driven retransmit lands well inside this window on a healthy
+// path, so a longer wait buys nothing.
+const reorderHoldTimeout = 250 * time.Millisecond
+
 func seqLess(a, b uint16) bool {
 	return (a-b)&0x8000 != 0
 }
@@ -837,6 +903,12 @@ type reorderBuffer struct {
 	pkts    map[uint16]*rtp.Packet
 	nextSeq uint16
 	started bool
+	// holdingSince is when drain() last came up empty while packets were
+	// still buffered, i.e. when we started waiting for a missing sequence
+	// number. Zero while the stream is contiguous.
+	holdingSince time.Time
+	// jumps counts skipped holes so the caller can report them.
+	jumps int64
 }
 
 func newReorderBuffer() *reorderBuffer {
@@ -856,7 +928,24 @@ func (b *reorderBuffer) push(pkt *rtp.Packet) []*rtp.Packet {
 	b.pkts[pkt.SequenceNumber] = cp
 	if len(b.pkts) > reorderWindow {
 		b.skipToOldest()
+		b.holdingSince = time.Time{}
+		return b.drain()
 	}
+
+	out := b.drain()
+	if len(out) > 0 {
+		b.holdingSince = time.Time{}
+		return out
+	}
+	if b.holdingSince.IsZero() {
+		b.holdingSince = time.Now()
+		return nil
+	}
+	if time.Since(b.holdingSince) < reorderHoldTimeout {
+		return nil
+	}
+	b.skipToOldest()
+	b.holdingSince = time.Time{}
 	return b.drain()
 }
 
@@ -883,6 +972,7 @@ func (b *reorderBuffer) skipToOldest() {
 		}
 	}
 	b.nextSeq = oldest
+	b.jumps++
 }
 
 type vp8FrameState struct {
@@ -891,6 +981,15 @@ type vp8FrameState struct {
 	lastSeq     uint16
 	haveLastSeq bool
 	frameValid  bool
+	// dropped counts frames discarded because the RTP stream lost or mangled
+	// a packet mid-frame. Optional (nil in unit tests).
+	dropped *atomic.Int64
+}
+
+func (s *vp8FrameState) drop() {
+	if s.dropped != nil {
+		s.dropped.Add(1)
+	}
 }
 
 // processRTPPacket returns a complete VP8 frame payload when fully assembled,
@@ -900,6 +999,7 @@ func (s *vp8FrameState) processRTPPacket(pkt *rtp.Packet) []byte {
 	if s.haveLastSeq && pkt.SequenceNumber != s.lastSeq+1 {
 		s.frameValid = false
 		s.frameBuf = s.frameBuf[:0]
+		s.drop()
 	}
 	s.lastSeq = pkt.SequenceNumber
 	s.haveLastSeq = true
@@ -908,6 +1008,7 @@ func (s *vp8FrameState) processRTPPacket(pkt *rtp.Packet) []byte {
 	if err != nil {
 		s.frameValid = false
 		s.frameBuf = s.frameBuf[:0]
+		s.drop()
 		return nil
 	}
 
@@ -927,6 +1028,7 @@ func (s *vp8FrameState) processRTPPacket(pkt *rtp.Packet) []byte {
 	if len(s.frameBuf)+len(vp8Payload) > maxAssembledFrameSize {
 		s.frameValid = false
 		s.frameBuf = s.frameBuf[:0]
+		s.drop()
 		return nil
 	}
 
@@ -950,9 +1052,12 @@ func (s *vp8FrameState) processRTPPacket(pkt *rtp.Packet) []byte {
 }
 
 func (p *streamTransport) readVP8Track(track *webrtc.TrackRemote) {
-	var state vp8FrameState
+	state := vp8FrameState{dropped: &p.rpDrops}
 	reorder := newReorderBuffer()
 	buf := make([]byte, rtpBufSize)
+	seenJumps := reorder.jumps
+
+	logger.Infof("vp8channel: subscribing to remote VP8 track ssrc=%d", track.SSRC())
 
 	for {
 		n, _, err := track.Read(buf)
@@ -964,13 +1069,19 @@ func (p *streamTransport) readVP8Track(track *webrtc.TrackRemote) {
 		if pkt.Unmarshal(buf[:n]) != nil {
 			continue
 		}
+		p.rtpPkts.Add(1)
 
 		for _, ordered := range reorder.push(pkt) {
 			frame := state.processRTPPacket(ordered)
 			if frame == nil {
 				continue
 			}
+			p.rpFrames.Add(1)
 			p.handleIncomingFrame(frame)
+		}
+		if reorder.jumps != seenJumps {
+			p.reorderJumps.Add(reorder.jumps - seenJumps)
+			seenJumps = reorder.jumps
 		}
 	}
 }
@@ -987,13 +1098,16 @@ func (p *streamTransport) handleFirstPeer(peerEpoch uint32) {
 func (p *streamTransport) handleIncomingFrame(frame []byte) {
 	frameToken, peerEpoch, ok := parseEpochHeader(frame)
 	if !ok {
+		p.crcFails.Add(1)
 		return
 	}
 	if frameToken != p.bindingToken {
+		p.tokenDrops.Add(1)
 		return
 	}
 	kcpPayload := frame[epochHdrLen:]
 	if peerEpoch == p.localEpochValue() {
+		p.selfDrops.Add(1)
 		return
 	}
 

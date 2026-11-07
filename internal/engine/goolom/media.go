@@ -49,6 +49,13 @@ func (s *Session) onDataChannelMessage(msg webrtc.DataChannelMessage) {
 func (s *Session) handleSdpOffer(offer map[string]any, uid string, sendPub bool) error {
 	sdp, _ := offer["sdp"].(string)
 	pcSeq, _ := offer["pcSeq"].(float64)
+	offerIndex := s.sdpOffers.Add(1)
+	// Every offer is a subscriber-PC renegotiation: the SFU recomputes routing
+	// and the in-flight media path restarts. The tunnel freezes whenever these
+	// arrive faster than the media path can recover, so count them and name the
+	// reason: a steady stream of offers right after our own setSlots means the
+	// request/offer loop is self-inflicted, not a room-state change.
+	logger.Verbosef("goolom subscriber offer #%d pcSeq=%v bytes=%d", offerIndex, pcSeq, len(sdp))
 
 	if err := s.pcSub.SetRemoteDescription(webrtc.SessionDescription{
 		Type: webrtc.SDPTypeOffer,
@@ -298,6 +305,8 @@ func (s *Session) sendSetSlots() error {
 	for _, g := range geometry {
 		slots = append(slots, map[string]int{"width": g[0], "height": g[1]})
 	}
+	slotIndex := s.setSlotsSent.Add(1)
+	logger.Verbosef("goolom setSlots #%d sent offers=%d", slotIndex, s.sdpOffers.Load())
 	if err := s.ws.WriteJSON(map[string]any{
 		keyUID: uuid.New().String(),
 		"setSlots": map[string]any{

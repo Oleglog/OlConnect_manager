@@ -9,6 +9,7 @@ import (
 	"hash/crc32"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -20,6 +21,17 @@ import (
 const wireCRCLen = 4
 
 var wireCRCTable = crc32.MakeTable(crc32.Castagnoli) //nolint:gochecknoglobals // read-only hot-path table
+
+// Process-wide receive-path diagnostics. The carrier can perturb bytes, and
+// every perturbed packet is silently converted into loss here so KCP
+// retransmits it. That makes a corruption-heavy path look exactly like a
+// loss-heavy one, so count both reasons the inbound queue discards a packet:
+// crcDrops (carrier mangled the bytes) and queueDrops (reader fell behind).
+//nolint:gochecknoglobals // diagnostics counters, read by the stats line
+var (
+	crcDrops   atomic.Int64
+	queueDrops atomic.Int64
+)
 
 func fakeUDPAddr() *net.UDPAddr {
 	return &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
@@ -67,11 +79,13 @@ func newKCPConn(out chan<- []byte, inboundCap int, epochHdr [epochHdrLen]byte) *
 // intentional - KCP will detect the loss via SACK and retransmit.
 func (c *kcpConn) deliver(payload []byte) {
 	if len(payload) < wireCRCLen {
+		crcDrops.Add(1)
 		return
 	}
 	body := payload[:len(payload)-wireCRCLen]
 	want := binary.BigEndian.Uint32(payload[len(payload)-wireCRCLen:])
 	if crc32.Checksum(body, wireCRCTable) != want {
+		crcDrops.Add(1)
 		return
 	}
 	cp := make([]byte, len(body))
@@ -80,6 +94,7 @@ func (c *kcpConn) deliver(payload []byte) {
 	case c.in <- cp:
 	case <-c.closed:
 	default:
+		queueDrops.Add(1)
 	}
 }
 

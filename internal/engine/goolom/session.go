@@ -133,6 +133,11 @@ type Session struct {
 	subscriberReady      atomic.Bool
 	publisherReady       atomic.Bool
 	setSlotsWatchdogRun atomic.Bool
+	// sdpOffers / setSlotsSent count subscriber renegotiations and slot
+	// requests. Both restart the SFU media path, so the ratio tells whether
+	// our own periodic setSlots is driving a renegotiation loop.
+	sdpOffers   atomic.Int64
+	setSlotsSent atomic.Int64
 	subscriberConn       chan struct{}
 	publisherConn   chan struct{}
 	wg              sync.WaitGroup

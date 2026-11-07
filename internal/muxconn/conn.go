@@ -33,6 +33,11 @@ import (
 // ErrClosed is returned from Read/Write after the conn has been closed.
 var ErrClosed = errors.New("muxconn: closed")
 
+// decryptDrops counts wire frames discarded because AEAD authentication
+// failed. Non-zero means the carrier handed us bytes that differ from what the
+// peer sent (or a stream reset raced an in-flight frame).
+var decryptDrops atomic.Int64 //nolint:gochecknoglobals // diagnostics counter
+
 const (
 	// inboundQueue is the buffered capacity of the Push -> Read pipeline.
 	// It absorbs short Read stalls without applying back-pressure to the
@@ -146,7 +151,15 @@ func (c *Conn) Push(ciphertext []byte) {
 	pt, err := c.cipher.DecryptInto(*bufPtr, ciphertext)
 	if err != nil {
 		releaseFrameBuf(bufPtr)
-		logger.Debugf("muxconn: decrypt failed, dropping frame: %v", err)
+		// One dropped ciphertext is one dropped *message*, which is a hole in
+		// the byte stream smux treats as reliable: every length prefix after
+		// it stays aligned only by luck, and the stream can hand a control
+		// frame to whatever reader is waiting (a handshake then fails with
+		// "unexpected handshake message: got CONTROL_PING"). Debug level hid
+		// this completely in the field, so name it at Info, rate-limited.
+		if n := decryptDrops.Add(1); n <= 5 || n%100 == 0 {
+			logger.Infof("muxconn: dropped undecryptable frame #%d (%d bytes): %v", n, len(ciphertext), err)
+		}
 		return
 	}
 	*bufPtr = pt
