@@ -38,6 +38,17 @@ const (
 	maxAssembledFrameSize = 4 * defaultMaxPayloadSize
 	defaultConnectTimeout = 60 * time.Second
 	rtpBufSize = 65536
+	// maxSampleBytes bounds one sample regardless of the batching or rate-cap
+	// settings. A sample is one VP8 frame on the wire: anything larger is
+	// fragmented into dozens of RTP packets under a single timestamp, and both
+	// ends punish that shape — the SFU drops the burst (measured 2026-11-07:
+	// 12 KiB samples over Telemost carried ~0 bytes, one KCP packet per sample
+	// carried the same 200 KB), and the peer's reassembler discards the entire
+	// frame when a single packet is lost. 8 KiB keeps a sample inside ~7
+	// packets, which caps throughput at fps*8 KiB (~960 KB/s at 120 fps) far
+	// above anything this carrier delivers.
+	maxSampleBytes = 8 * 1024
+
 	// outboundQueueSize bounds KCP packets waiting for the paced writer. Sized
 	// to a couple of send windows so KCP's flush never blocks (a blocked
 	// WriteTo would stall KCP's update loop and delay ACKs); the paced writer
@@ -284,6 +295,9 @@ func newStreamTransport(
 		if perTickBytes < epochHdrLen {
 			perTickBytes = epochHdrLen
 		}
+	}
+	if perTickBytes > maxSampleBytes {
+		perTickBytes = maxSampleBytes
 	}
 
 	tr := &streamTransport{
