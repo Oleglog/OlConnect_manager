@@ -372,6 +372,9 @@ EOF
     if [ -n "${OLCRTC_VP8_SNDWND:-}" ]; then
         echo "  sndwnd: ${OLCRTC_VP8_SNDWND}" >> "$CONFIG_FILE"
     fi
+    if [ -n "${OLCRTC_VP8_COALESCE:-}" ] && [ "${OLCRTC_VP8_COALESCE}" != "0" ] && [ "${OLCRTC_VP8_COALESCE}" != "false" ]; then
+        echo "  coalesce: true" >> "$CONFIG_FILE"
+    fi
 fi
 
 # SEI options

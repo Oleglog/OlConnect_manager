@@ -178,6 +178,8 @@ type VP8Config struct {
 	MaxBytesPerSec int
 	// SndWnd overrides the KCP send window in segments. Zero keeps the default.
 	SndWnd int
+	// Coalesce lets the writer accumulate several KCP segments into one sample.
+	Coalesce bool
 }
 
 // SEIConfig holds tunables for the seichannel transport.

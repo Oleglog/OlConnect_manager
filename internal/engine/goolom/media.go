@@ -135,8 +135,41 @@ func (s *Session) handleSdpAnswer(answer map[string]any, uid string) {
 		go func() { _ = s.pcPub.Close() }()
 	} else {
 		s.flushPendingICE(false)
+		logVideoSection("publisher answer", sdp)
 	}
 	s.sendAck(uid)
+}
+
+// logVideoSection names the attributes of the video m-line in an SDP, because
+// the carrier's allocation for the published track is negotiated there. An
+// answer that carries no b=AS/b=TIAS and no a=x-google-max-bitrate is telling us
+// the SFU applies its own policy, and that policy (visible as REMB on the
+// publisher sender, see drainPublisherRTCP) is the ceiling a throughput
+// investigation has to measure against instead of guessing.
+func logVideoSection(direction, sdp string) {
+	if !logger.IsVerbose() || sdp == "" {
+		return
+	}
+	inVideo := false
+	for _, line := range strings.Split(sdp, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "m=") {
+			inVideo = strings.HasPrefix(line, "m=video")
+			if inVideo {
+				logger.Verbosef("goolom %s m-line: %s", direction, line)
+			}
+			continue
+		}
+		if !inVideo {
+			continue
+		}
+		for _, prefix := range []string{"b=", "a=x-google", "a=rtcp-fb", "a=fmtp"} {
+			if strings.HasPrefix(line, prefix) {
+				logger.Verbosef("goolom %s attr: %s", direction, line)
+				break
+			}
+		}
+	}
 }
 
 func (s *Session) flushPendingICE(subscriber bool) {
