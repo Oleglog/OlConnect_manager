@@ -316,7 +316,7 @@ func Apply(dst session.Config, f File) session.Config {
 	dst.VP8.BatchSize = pickInt(dst.VP8.BatchSize, f.VP8.BatchSize)
 	dst.VP8.MaxSampleBytes = pickInt(dst.VP8.MaxSampleBytes, f.VP8.MaxSampleBytes)
 	dst.VP8.MTU = pickInt(dst.VP8.MTU, f.VP8.MTU)
-	dst.VP8.CC = dst.VP8.CC || f.VP8.CC
+	dst.VP8.EnableCC = dst.VP8.EnableCC || f.VP8.CC
 	dst.SEI.FPS = pickInt(dst.SEI.FPS, f.SEI.FPS)
 	dst.SEI.BatchSize = pickInt(dst.SEI.BatchSize, f.SEI.BatchSize)
 	dst.SEI.FragmentSize = pickInt(dst.SEI.FragmentSize, f.SEI.FragmentSize)
@@ -378,7 +378,7 @@ func ApplyProfile(base session.Config, p Profile) session.Config {
 	dst.VP8.BatchSize = overlayInt(dst.VP8.BatchSize, p.VP8.BatchSize)
 	dst.VP8.MaxSampleBytes = overlayInt(dst.VP8.MaxSampleBytes, p.VP8.MaxSampleBytes)
 	dst.VP8.MTU = overlayInt(dst.VP8.MTU, p.VP8.MTU)
-	dst.VP8.CC = dst.VP8.CC || p.VP8.CC
+	dst.VP8.EnableCC = dst.VP8.EnableCC || p.VP8.CC
 	dst.SEI.FPS = overlayInt(dst.SEI.FPS, p.SEI.FPS)
 	dst.SEI.BatchSize = overlayInt(dst.SEI.BatchSize, p.SEI.BatchSize)
 	dst.SEI.FragmentSize = overlayInt(dst.SEI.FragmentSize, p.SEI.FragmentSize)
