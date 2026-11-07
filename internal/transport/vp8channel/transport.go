@@ -38,22 +38,22 @@ const (
 	maxAssembledFrameSize = 4 * defaultMaxPayloadSize
 	defaultConnectTimeout = 60 * time.Second
 	rtpBufSize = 65536
-	// maxSampleBytes bounds one sample regardless of the batching or rate-cap
-	// settings. A sample is one VP8 frame on the wire: anything larger is
-	// fragmented into dozens of RTP packets under a single timestamp, and both
-	// ends punish that shape — the SFU drops the burst (measured 2026-11-07:
-	// 12 KiB samples over Telemost carried ~0 bytes, one KCP packet per sample
-	// carried the same 200 KB), and the peer's reassembler discards the entire
-	// frame when a single packet is lost. 8 KiB keeps a sample inside ~7
-	// packets, which caps throughput at fps*8 KiB (~960 KB/s at 120 fps) far
-	// above anything this carrier delivers.
-	maxSampleBytes = 8 * 1024
-
 	// singleRTPPacket is the largest sample that still fits one RTP packet for
 	// a 1200-byte path MTU (pion payload plus the VP8 payload descriptor). A
 	// fragmented sample survives only if every one of its packets does, so the
 	// fragmentation ratio is the number to watch when goodput collapses.
 	singleRTPPacket = 1180
+
+	// maxSampleBytes bounds one sample regardless of the batching or rate-cap
+	// settings. A sample is one VP8 frame on the wire, and it survives only if
+	// every RTP packet it was fragmented into survives: measured over Telemost
+	// on 2026-11-07, an 8 KiB sample (seven packets) carried ~10% of its frames
+	// while the same tunnel with one-packet samples carried them. One packet per
+	// sample is therefore the default shape, not an optimisation: it is the
+	// difference between a retransmit storm at 41 KB/s of wire traffic carrying
+	// nothing and a working tunnel. Anything larger must be asked for
+	// explicitly with vp8.max_sample_bytes.
+	maxSampleBytes = singleRTPPacket
 
 	// outboundQueueSize bounds KCP packets waiting for the paced writer. Sized
 	// to a couple of send windows so KCP's flush never blocks (a blocked
