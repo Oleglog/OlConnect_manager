@@ -1,5 +1,5 @@
-﻿#!/usr/bin/env bash
-# olcRTC Installer v1.0.0 вЂ” install-only, no management menu.
+#!/usr/bin/env bash
+# olcRTC Installer v1.0.0 — install-only, no management menu.
 # Installs olcrtc + olcrtc-admin binaries, systemd units, generates keys/env.
 # Re-run without flags shows status and Admin UI URL.
 #
@@ -26,7 +26,7 @@ ADMIN_ENV=$CONFIG_DIR/admin.env
 ENV_FILE=$CONFIG_DIR/env
 KEY_FILE=$CONFIG_DIR/key.hex
 
-# в”Ђв”Ђ Flags в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# ── Flags ────────────────────────────────────────────────────────────────────
 DO_UPDATE=0
 DO_UPDATE_OPENFLUX=0
 DO_UNINSTALL=0
@@ -40,7 +40,7 @@ TRANSPORT=""
 SET_NAME=""
 SET_ID=""
 
-# в”Ђв”Ђ Helpers в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# ── Helpers ──────────────────────────────────────────────────────────────────
 tty_read() {
     if [ -t 0 ]; then read "$@"; else read "$@" < /dev/tty; fi
 }
@@ -87,7 +87,7 @@ is_installed() {
     [ -f /usr/local/bin/olcrtc ] && [ -f /etc/systemd/system/olcrtc-server.service ] && [ -f "$ENV_FILE" ]
 }
 
-# в”Ђв”Ђ Download helpers в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# ── Download helpers ─────────────────────────────────────────────────────────
 detect_arch() {
     local arch
     arch="$(uname -m)"
@@ -121,7 +121,7 @@ resolve_release_tag() {
     fi
     if [ -z "$tag" ]; then
         tag="server-v${INSTALLER_VERSION}"
-        echo "[!] РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РїРѕСЃР»РµРґРЅРёР№ СЂРµР»РёР·, РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ ${tag}" >&2
+        echo "[!] Не удалось определить последний релиз, используется ${tag}" >&2
     fi
     RELEASE_TAG="$tag"
     RELEASE_VERSION="${tag#server-v}"
@@ -163,7 +163,7 @@ download_release() {
     return 1
 }
 
-# в”Ђв”Ђ Uninstall в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# ── Uninstall ────────────────────────────────────────────────────────────────
 do_uninstall() {
     if [ -x /usr/local/lib/olcrtc/wb-automation/uninstall.sh ]; then
         echo "[*] Removing WB browser automation..."
@@ -197,10 +197,10 @@ do_uninstall() {
     # progress state (the UI then reported the previous run's error).
     rm -f /tmp/olcrtc-update-state.json /tmp/olcrtc-update.sh /tmp/olcrtc-update.log
 
-    echo "[*] olcRTC РїРѕР»РЅРѕСЃС‚СЊСЋ СѓРґР°Р»С‘РЅ."
+    echo "[*] olcRTC полностью удалён."
 }
 
-# в”Ђв”Ђ OpenFlux Download/Update в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# ── OpenFlux Download/Update ─────────────────────────────────────────────────
 update_openflux() {
     local arch
     arch="$(detect_arch)"
@@ -241,7 +241,7 @@ update_openflux() {
     rm -rf "$tmpdir"
 }
 
-# в”Ђв”Ђ Update в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# ── Update ───────────────────────────────────────────────────────────────────
 do_update() {
     echo "[*] Updating binaries..."
     local arch
@@ -298,7 +298,7 @@ do_update() {
     echo "[*] Update complete."
 }
 
-# в”Ђв”Ђ Argument parsing в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# ── Argument parsing ─────────────────────────────────────────────────────────
 usage() {
     cat <<EOF
 Usage: sudo ./olcrtc-setup.sh [options]
@@ -307,10 +307,10 @@ Options:
     --carrier <jitsi|telemost|wbstream>   Carrier (default: $CARRIER_DEFAULT)
     --transport <datachannel|vp8channel|seichannel>  Transport (default: $TRANSPORT_DEFAULT)
     --name <string>                      Connection name
-    --id <room_id>                       Room ID. Р”Р»СЏ wbstream вЂ” РѕР±СЏР·Р°С‚РµР»СЊРЅРѕ (СЃРѕР·РґР°С‚СЊ
-                                         СЂСѓРјСѓ РЅР° stream.wb.ru); РґР»СЏ telemost вЂ” РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ.
+    --id <room_id>                       Room ID. Для wbstream — обязательно (создать
+                                         руму на stream.wb.ru); для telemost — опционально.
     --regenerate                         Regenerate Room ID (jitsi/telemost)
-    --regenerate-key                     Regenerate РєР»СЋС‡ (Room ID РЅРµ С‚СЂРѕРіР°РµС‚СЃСЏ)
+    --regenerate-key                     Regenerate ключ (Room ID не трогается)
     --update                             Update binaries
     --update-openflux                    Update only OpenFlux binary
     --uninstall                          Full uninstall
@@ -358,13 +358,13 @@ if [ "$DO_UPDATE" -eq 1 ]; then do_update; exit 0; fi
 if [ "$DO_UPDATE_OPENFLUX" -eq 1 ]; then
     update_openflux
     systemctl restart olcrtc-server.service 2>/dev/null || true
-    echo "[*] OpenFlux РѕР±РЅРѕРІР»РµРЅ Рё СЃРµСЂРІРёСЃ РїРµСЂРµР·Р°РїСѓС‰РµРЅ."
+    echo "[*] OpenFlux обновлен и сервис перезапущен."
     exit 0
 fi
 if [ "$DO_SHOW_TOKEN" -eq 1 ]; then
     if [ -f "$ADMIN_ENV" ]; then
-        echo "Р›РѕРіРёРЅ: $(grep '^OLCRTC_ADMIN_USER=' "$ADMIN_ENV" | cut -d= -f2-)"
-        echo "РџР°СЂРѕР»СЊ: $(grep '^OLCRTC_ADMIN_PASS=' "$ADMIN_ENV" | cut -d= -f2-)"
+        echo "Логин: $(grep '^OLCRTC_ADMIN_USER=' "$ADMIN_ENV" | cut -d= -f2-)"
+        echo "Пароль: $(grep '^OLCRTC_ADMIN_PASS=' "$ADMIN_ENV" | cut -d= -f2-)"
     else
         echo "[!] Admin env not found" >&2; exit 1
     fi
@@ -376,9 +376,9 @@ if [ "$DO_STATUS" -eq 1 ]; then
     exit 0
 fi
 
-# в”Ђв”Ђ Re-run on already-installed system в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# ── Re-run on already-installed system ───────────────────────────────────────
 if is_installed; then
-    echo "  olcRTC СѓР¶Рµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ."
+    echo "  olcRTC уже установлен."
     echo ""
     ADMIN_PORT="$(get_env_value OLCRTC_ADMIN_PORT "$ADMIN_ENV" 2>/dev/null || echo "8443")"
     PUBLIC_IP="$(get_public_ip)"
@@ -387,28 +387,28 @@ if is_installed; then
     systemctl is-active olcrtc-admin.service >/dev/null 2>&1 && echo "  olcrtc-admin:  running" || echo "  olcrtc-admin:  not running"
     echo ""
     resolve_release_tag
-    echo "  РџРѕСЃР»РµРґРЅРёР№ СЂРµР»РёР·: $RELEASE_TAG"
-    echo "  РћР±РЅРѕРІРёС‚СЊ РґРѕ РЅРµРіРѕ РѕРґРЅРѕР№ РєРѕРјР°РЅРґРѕР№:"
+    echo "  Последний релиз: $RELEASE_TAG"
+    echo "  Обновить до него одной командой:"
     echo "    curl -fsSL https://raw.githubusercontent.com/${REPO}/master/server-install/olcrtc-setup.sh | sudo bash -s -- --update"
     echo ""
-    echo "  Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Рµ РґРµР№СЃС‚РІРёСЏ:"
-    echo "    --update          РћР±РЅРѕРІРёС‚СЊ Р±РёРЅР°СЂРЅРёРєРё"
-    echo "    --regenerate      РџРµСЂРµСЃРѕР·РґР°С‚СЊ Room ID"
-    echo "    --regenerate-key  РџРµСЂРµСЃРѕР·РґР°С‚СЊ РєР»СЋС‡ + Room ID"
-    echo "    --uninstall       РџРѕР»РЅРѕРµ СѓРґР°Р»РµРЅРёРµ"
-    echo "    --show-token      РџРѕРєР°Р·Р°С‚СЊ С‚РѕРєРµРЅ"
+    echo "  Дополнительные действия:"
+    echo "    --update          Обновить бинарники"
+    echo "    --regenerate      Пересоздать Room ID"
+    echo "    --regenerate-key  Пересоздать ключ + Room ID"
+    echo "    --uninstall       Полное удаление"
+    echo "    --show-token      Показать токен"
     echo ""
     exit 0
 fi
 
-# в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ
+# ══════════════════════════════════════════════════════════════════════════════
 #  Fresh installation
-# в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ
+# ══════════════════════════════════════════════════════════════════════════════
 
 echo ""
-echo "  в•”в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•—"
-echo "  в•‘  olcRTC Installer v${INSTALLER_VERSION}                  в•‘"
-echo "  в•љв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ќ"
+echo "  ╔═══════════════════════════════════════════╗"
+echo "  ║  olcRTC Installer v${INSTALLER_VERSION}                  ║"
+echo "  ╚═══════════════════════════════════════════╝"
 echo ""
 
 ARCH="$(detect_arch)"
@@ -418,44 +418,44 @@ if [[ "$ARCH" == unsupported* ]]; then
 fi
 echo "    Architecture: $ARCH"
 
-# в”Ђв”Ђ 1. Check system в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-echo "  [1/7] РџСЂРѕРІРµСЂРєР° СЃРёСЃС‚РµРјС‹..."
+# ── 1. Check system ──────────────────────────────────────────────────────────
+echo "  [1/7] Проверка системы..."
 for pkg in curl systemctl; do
     if ! command -v "$pkg" >/dev/null 2>&1; then
         echo "  [!] Missing: $pkg" >&2; exit 1
     fi
 done
-echo "              вњ“"
+echo "              ✓"
 
-# в”Ђв”Ђ 2. Download olcrtc в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-echo "  [2/7] РЎРєР°С‡РёРІР°РЅРёРµ olcrtc binary..."
+# ── 2. Download olcrtc ───────────────────────────────────────────────────────
+echo "  [2/7] Скачивание olcrtc binary..."
 TMPDIR="$(mktemp -d)"
 resolve_release_tag
-echo "        Р РµР»РёР·: $RELEASE_TAG"
+echo "        Релиз: $RELEASE_TAG"
 # A previous install may have left a finished/failed update state behind.
 rm -f /tmp/olcrtc-update-state.json
 if ! download_release "olcrtc-linux-${ARCH}" "$TMPDIR/olcrtc"; then
-    echo "  [!] РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ olcrtc binary. РџСЂРѕРІРµСЂСЊС‚Рµ СЃРѕРµРґРёРЅРµРЅРёРµ." >&2
+    echo "  [!] Не удалось скачать olcrtc binary. Проверьте соединение." >&2
     rm -rf "$TMPDIR"
     exit 1
 fi
-echo "              вњ“"
+echo "              ✓"
 
-# в”Ђв”Ђ 3. Download olcrtc-admin в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-echo "  [3/7] РЎРєР°С‡РёРІР°РЅРёРµ olcrtc-admin..."
+# ── 3. Download olcrtc-admin ─────────────────────────────────────────────────
+echo "  [3/7] Скачивание olcrtc-admin..."
 if ! download_release "olcrtc-admin-linux-${ARCH}" "$TMPDIR/olcrtc-admin"; then
-    echo "  [!] РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ olcrtc-admin. РЈСЃС‚Р°РЅРѕРІРєР° olcrtc-admin РїСЂРѕРїСѓС‰РµРЅР°." >&2
+    echo "  [!] Не удалось скачать olcrtc-admin. Установка olcrtc-admin пропущена." >&2
     touch "$TMPDIR/olcrtc-admin-missing"
 fi
-echo "              вњ“"
+echo "              ✓"
 
-# в”Ђв”Ђ 4. Interactive config в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-echo "  [4/7] РќР°СЃС‚СЂРѕР№РєР°:"
+# ── 4. Interactive config ────────────────────────────────────────────────────
+echo "  [4/7] Настройка:"
 echo ""
-echo "        Р”РѕСЃС‚СѓРїРЅС‹Рµ carrier:"
-echo "          wbstream  вЂ” Wildberries Stream (СЂСѓРјСѓ РЅСѓР¶РЅРѕ СЃРѕР·РґР°С‚СЊ РІСЂСѓС‡РЅСѓСЋ РЅР° stream.wb.ru)"
-echo "          jitsi     вЂ” Jitsi Meet (Р°РІС‚РѕСЃРѕР·РґР°РЅРёРµ СЂСѓРјС‹)"
-echo "          telemost  вЂ” Yandex Telemost"
+echo "        Доступные carrier:"
+echo "          wbstream  — Wildberries Stream (руму нужно создать вручную на stream.wb.ru)"
+echo "          jitsi     — Jitsi Meet (автосоздание румы)"
+echo "          telemost  — Yandex Telemost"
 if [ -z "$CARRIER" ]; then
     tty_read -rp "        Carrier [wbstream]: " CARRIER
     CARRIER="${CARRIER:-wbstream}"
@@ -463,33 +463,33 @@ fi
 CARRIER="$(normalize_carrier "$CARRIER")"
 
 echo ""
-echo "        Р”РѕСЃС‚СѓРїРЅС‹Рµ transport:"
-echo "          vp8channel   вЂ” СѓРЅРёРІРµСЂСЃР°Р»СЊРЅС‹Р№, СЂР°Р±РѕС‚Р°РµС‚ СЃРѕ РІСЃРµРјРё (СЂРµРєРѕРјРµРЅРґСѓРµС‚СЃСЏ)"
-echo "          datachannel  вЂ” Р±С‹СЃС‚СЂС‹Р№ (~6 РњР‘/СЃ), РЅРѕ РјРѕР¶РµС‚ РЅРµ СЂР°Р±РѕС‚Р°С‚СЊ СЃ telemost/wbstream"
-echo "          seichannel   вЂ” РґР»СЏ wbstream/jitsi"
+echo "        Доступные transport:"
+echo "          vp8channel   — универсальный, работает со всеми (рекомендуется)"
+echo "          datachannel  — быстрый (~6 МБ/с), но может не работать с telemost/wbstream"
+echo "          seichannel   — для wbstream/jitsi"
 if [ -z "$TRANSPORT" ]; then
     tty_read -rp "        Transport [vp8channel]: " TRANSPORT
     TRANSPORT="${TRANSPORT:-vp8channel}"
 fi
 
 echo ""
-echo "        РџРѕРґРїРёСЃРєРё вЂ” РїСѓР±Р»РёС‡РЅС‹Рµ СЃСЃС‹Р»РєРё СЃ URIs РґР»СЏ РєР»РёРµРЅС‚РѕРІ."
+echo "        Подписки — публичные ссылки с URIs для клиентов."
 echo "        URL: https://IP:PORT/sub/XXXXXX"
 SUB_ENABLED=""
 while [ "$SUB_ENABLED" != "y" ] && [ "$SUB_ENABLED" != "n" ] && [ "$SUB_ENABLED" != "Y" ] && [ "$SUB_ENABLED" != "N" ]; do
-    tty_read -rp "        РџРѕРґРїРёСЃРєРё [Y/n]: " SUB_ENABLED
+    tty_read -rp "        Подписки [Y/n]: " SUB_ENABLED
     SUB_ENABLED="${SUB_ENABLED:-y}"
 done
 
 echo ""
 if [ -z "$SET_NAME" ]; then
     DEFAULT_NAME="${CARRIER}_olcrtc"
-    tty_read -rp "        РРјСЏ РёРЅСЃС‚Р°РЅСЃР° [${DEFAULT_NAME}]: " SET_NAME
+    tty_read -rp "        Имя инстанса [${DEFAULT_NAME}]: " SET_NAME
     SET_NAME="${SET_NAME:-$DEFAULT_NAME}"
 fi
 
-# в”Ђв”Ђ 5. Install binaries в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-echo "  [5/7] РЈСЃС‚Р°РЅРѕРІРєР° Р±РёРЅР°СЂРЅРёРєРѕРІ..."
+# ── 5. Install binaries ──────────────────────────────────────────────────────
+echo "  [5/7] Установка бинарников..."
 install -m 0755 -o root -g root "$TMPDIR/olcrtc" /usr/local/bin/olcrtc
 
 if [ ! -f "$TMPDIR/olcrtc-admin-missing" ]; then
@@ -502,7 +502,7 @@ update_openflux || true
 # server-install/systemd/olcrtc-launcher. There is deliberately no inline copy
 # here: the two copies drifted once (v2.3.5 shipped a heredoc without the
 # CONFIG_FILE default, and `set -u` turned that into "line 139: CONFIG_FILE:
-# unbound variable" on every service start вЂ” issue #57). When the bundle is not
+# unbound variable" on every service start — issue #57). When the bundle is not
 # next to this script (curl | bash), fetch the same file from GitHub; if that
 # also fails, stop instead of installing a unit that cannot start.
 SCRIPT_DIR=""
@@ -521,10 +521,10 @@ else
     exit 1
 fi
 rm -rf "$TMPDIR"
-echo "              вњ“"
+echo "              ✓"
 
-# в”Ђв”Ђ 6. Generate keys, env, admin.env в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-echo "  [6/7] Р“РµРЅРµСЂР°С†РёСЏ РєР»СЋС‡РµР№ Рё РєРѕРЅС„РёРіСѓСЂР°С†РёРё..."
+# ── 6. Generate keys, env, admin.env ─────────────────────────────────────────
+echo "  [6/7] Генерация ключей и конфигурации..."
 
 # Create user.
 if ! id olcrtc >/dev/null 2>&1; then
@@ -544,7 +544,7 @@ fi
 KEY="$(cat "$KEY_FILE")"
 
 # Room ID.
-# wbstream: room must be created manually at https://stream.wb.ru вЂ” the public
+# wbstream: room must be created manually at https://stream.wb.ru — the public
 # room-creation API was removed by WB. We prompt the user for it (or accept --id).
 # jitsi: still supports auto-generation server-side (ROOM_ID=any).
 # telemost: generate a random olcrtc-XXXX id, or accept --id.
@@ -562,9 +562,9 @@ case "$CARRIER" in
     wbstream)
         while [ -z "$ROOM_ID" ] || [ "$ROOM_ID" = "any" ]; do
             echo ""
-            echo "        WB Stream Р±РѕР»СЊС€Рµ РЅРµ СЃРѕР·РґР°С‘С‚ СЂСѓРјС‹ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё."
-            echo "        РћС‚РєСЂРѕР№С‚Рµ https://stream.wb.ru, СЃРѕР·РґР°Р№С‚Рµ СЂСѓРјСѓ Рё СЃРєРѕРїРёСЂСѓР№С‚Рµ"
-            echo "        Room ID РёР· URL (С„РѕСЂРјР°С‚: 8-СЃРёРјРІРѕР»СЊРЅС‹Р№ РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ)."
+            echo "        WB Stream больше не создаёт румы автоматически."
+            echo "        Откройте https://stream.wb.ru, создайте руму и скопируйте"
+            echo "        Room ID из URL (формат: 8-символьный идентификатор)."
             tty_read -rp "        WB Stream Room ID: " ROOM_ID
             ROOM_ID="$(echo "$ROOM_ID" | tr -d '[:space:]')"
         done
@@ -575,7 +575,7 @@ case "$CARRIER" in
         fi
         ;;
     *)
-        # jitsi Рё РїСЂРѕС‡РёРµ carrier-С‹, РїРѕРґРґРµСЂР¶РёРІР°СЋС‰РёРµ server-side auto-gen.
+        # jitsi и прочие carrier-ы, поддерживающие server-side auto-gen.
         if [ -z "$ROOM_ID" ]; then
             ROOM_ID="any"
         fi
@@ -585,7 +585,7 @@ esac
 # Subscription server port. Default 2096; auto-pick if occupied (e.g. by 3x-ui).
 SUB_PORT=2096
 if timeout 1 bash -c "</dev/tcp/127.0.0.1/${SUB_PORT}" 2>/dev/null; then
-    # 2096 busy вЂ” pick first free fallback.
+    # 2096 busy — pick first free fallback.
     SUB_PORT=""
     for p in 2097 2099 3096 3097 3099 4096 4097; do
         if ! timeout 1 bash -c "</dev/tcp/127.0.0.1/${p}" 2>/dev/null; then
@@ -593,11 +593,11 @@ if timeout 1 bash -c "</dev/tcp/127.0.0.1/${SUB_PORT}" 2>/dev/null; then
         fi
     done
     if [ -z "$SUB_PORT" ]; then
-        echo "вљ  РќРµ СѓРґР°Р»РѕСЃСЊ РЅР°Р№С‚Рё СЃРІРѕР±РѕРґРЅС‹Р№ РїРѕСЂС‚ РґР»СЏ sub-СЃРµСЂРІРµСЂР° (РїСЂРѕРІРµСЂРµРЅС‹ 2096вЂ“4097)." >&2
-        echo "  РћС‚СЂРµРґР°РєС‚РёСЂСѓР№ OLCRTC_SUB_PORT РІСЂСѓС‡РЅСѓСЋ РІ $ADMIN_ENV Рё $ENV_FILE." >&2
+        echo "⚠ Не удалось найти свободный порт для sub-сервера (проверены 2096–4097)." >&2
+        echo "  Отредактируй OLCRTC_SUB_PORT вручную в $ADMIN_ENV и $ENV_FILE." >&2
         SUB_PORT=2096
     else
-        echo "  в„№ РџРѕСЂС‚ 2096 Р·Р°РЅСЏС‚, sub-СЃРµСЂРІРµСЂ Р±СѓРґРµС‚ СЃР»СѓС€Р°С‚СЊ РЅР° :$SUB_PORT"
+        echo "  ℹ Порт 2096 занят, sub-сервер будет слушать на :$SUB_PORT"
     fi
 fi
 
@@ -656,8 +656,8 @@ OLCRTC_SUB_PUBLIC_URL=
 EOF
 chmod 0600 "$ADMIN_ENV"
 
-# в”Ђв”Ђ 7. Systemd units в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-echo "  [7/7] РЎРѕР·РґР°РЅРёРµ systemd-СЋРЅРёС‚РѕРІ..."
+# ── 7. Systemd units ─────────────────────────────────────────────────────────
+echo "  [7/7] Создание systemd-юнитов..."
 
 cat > /etc/systemd/system/olcrtc-server.service <<'UNIT'
 [Unit]
@@ -776,19 +776,19 @@ systemctl start olcrtc-admin.service 2>/dev/null || true
 
 PUBLIC_IP="$(get_public_ip)"
 
-# в”Ђв”Ђ Done в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# ── Done ─────────────────────────────────────────────────────────────────────
 echo ""
-echo "  в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ"
-echo "  РЈСЃС‚Р°РЅРѕРІРєР° Р·Р°РІРµСЂС€РµРЅР°!"
-echo "  в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ"
+echo "  ═══════════════════════════════════════════"
+echo "  Установка завершена!"
+echo "  ═══════════════════════════════════════════"
 echo ""
 echo "  Admin UI:  https://${PUBLIC_IP}:${ADMIN_PORT}"
-echo "  Р›РѕРіРёРЅ:     ${ADMIN_USER}"
-echo "  РџР°СЂРѕР»СЊ:    ${ADMIN_PASS}"
+echo "  Логин:     ${ADMIN_USER}"
+echo "  Пароль:    ${ADMIN_PASS}"
 echo ""
-echo "  вљ   РЎРµСЂС‚РёС„РёРєР°С‚ СЃР°РјРѕРїРѕРґРїРёСЃР°РЅРЅС‹Р№."
-echo "     Р’ Р±СЂР°СѓР·РµСЂРµ РЅР°Р¶РјРёС‚Рµ 'Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ' в†’ 'РџРµСЂРµР№С‚Рё'."
+echo "  ⚠  Сертификат самоподписанный."
+echo "     В браузере нажмите 'Дополнительно' → 'Перейти'."
 echo ""
-echo "  Р”Р°Р»СЊРЅРµР№С€РµРµ СѓРїСЂР°РІР»РµРЅРёРµ вЂ” С‡РµСЂРµР· Web UI."
-echo "  в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ"
+echo "  Дальнейшее управление — через Web UI."
+echo "  ═══════════════════════════════════════════"
 echo ""
