@@ -337,11 +337,20 @@ func newStreamTransport(
 			perTickBytes = epochHdrLen
 		}
 	}
-	if perTickBytes > maxSampleBytes {
-		perTickBytes = maxSampleBytes
+	// The per-sample cap. Operator intent wins over the package default in BOTH
+	// directions: vp8.max_sample_bytes is what lets one sample carry several KCP
+	// segments, and the previous clamp only ever lowered the 1180-byte default,
+	// so 4/8/16 KiB requests were silently inert (measured 2026-11-07: maxS
+	// stayed at the MTU in every point of the grid).
+	sampleCap := maxSampleBytes
+	if opts.MaxSampleBytes > 0 {
+		sampleCap = opts.MaxSampleBytes
 	}
-	if opts.MaxSampleBytes > 0 && perTickBytes > opts.MaxSampleBytes {
-		perTickBytes = opts.MaxSampleBytes
+	if sampleCap > defaultMaxPayloadSize {
+		sampleCap = defaultMaxPayloadSize
+	}
+	if perTickBytes > sampleCap {
+		perTickBytes = sampleCap
 	}
 	// A sample below one RTP payload's worth of KCP framing cannot be emitted at
 	// all, so keep room for the epoch header plus a minimal KCP segment.
@@ -943,13 +952,17 @@ func (p *streamTransport) writerLoop() {
 			// savings — the batcher drains the queue non-blockingly below.
 			// The data budget, not the tick, is what bounds the rate.
 			//
-			// With vp8.coalesce the opposite is wanted: waiting one interval
-			// lets the batcher collect several KCP segments, which is the only
-			// way a sample can exceed one segment (see the option's comment).
-			if p.coalesce && !p.waitTick(ticker) {
-				return
+			// With vp8.coalesce the opposite is wanted: a sample has to carry
+			// several KCP segments before the carrier treats it differently.
+			// Waiting a single tick was not enough — measured 2026-11-07, maxS
+			// stayed at the MTU across max_sample_bytes 4/8/16 KiB because one
+			// tick only ever sees one segment — so the batcher now waits for a
+			// size target with a deadline behind it.
+			if p.coalesce {
+				p.writeTrackSample(p.batchSampleWindow(frame, p.perTickBytes, coalesceWindow(p.frameInterval)))
+			} else {
+				p.writeTrackSample(p.batchSample(frame, p.perTickBytes))
 			}
-			p.writeTrackSample(p.batchSample(frame, p.perTickBytes))
 			idleTicks = 0
 			if !time.Now().Before(keyframeAt) {
 				keyframeAt = time.Now().Add(2 * time.Second)
@@ -987,15 +1000,60 @@ func (p *streamTransport) writerLoop() {
 	}
 }
 
-// waitTick waits for the next writer tick and reports false if the transport
-// closed while waiting.
-func (p *streamTransport) waitTick(ticker *time.Ticker) bool {
-	select {
-	case <-p.closeCh:
-		return false
-	case <-ticker.C:
-		return true
+// coalesceWindow bounds how long one sample may wait for more KCP segments. Four
+// frame intervals keeps the added latency invisible at the carrier's own frame
+// cadence while still letting 4-8 segments accumulate at 120 fps, and it scales
+// with fps so a 30 fps publisher does not wait eight times as long.
+func coalesceWindow(frameInterval time.Duration) time.Duration {
+	return 4 * frameInterval
+}
+
+// batchSampleWindow collects KCP segments into one sample until it reaches
+// maxBytes or the window elapses. The size target alone cannot work: the writer
+// sees exactly one queued segment per tick, so a sample would never grow; the
+// window alone cannot work either, because it would cut a sample short under
+// load. Together they give "as much as fits, but not later than this".
+//
+// The buffer is sized for one segment of overshoot and the last dequeued
+// segment is always appended: refusing it would silently drop a KCP packet,
+// which KCP would then have to retransmit.
+func (p *streamTransport) batchSampleWindow(first []byte, maxBytes int, window time.Duration) []byte {
+	if maxBytes <= 0 || maxBytes > defaultMaxPayloadSize {
+		maxBytes = defaultMaxPayloadSize
 	}
+	if len(first) <= epochHdrLen || p.batchSize <= 1 {
+		return first
+	}
+
+	deadline := time.Now().Add(window)
+	sample := make([]byte, 0, maxBytes+kcpMTU)
+	sample = append(sample, first[:epochHdrLen]...)
+	sample = append(sample, kcpBatchMagic[:]...)
+	sample = appendBatchPacket(sample, first[epochHdrLen:])
+
+	for packets := 1; packets < p.batchSize; packets++ {
+		if len(sample) >= maxBytes {
+			return sample
+		}
+		wait := time.Until(deadline)
+		if wait <= 0 {
+			return sample
+		}
+		if wait > 5*time.Millisecond {
+			wait = 5 * time.Millisecond
+		}
+		select {
+		case frame := <-p.outbound:
+			if len(frame) <= epochHdrLen {
+				continue
+			}
+			sample = appendBatchPacket(sample, frame[epochHdrLen:])
+		case <-p.closeCh:
+			return sample
+		case <-time.After(wait):
+		}
+	}
+	return sample
 }
 
 func (p *streamTransport) batchSample(first []byte, maxBytes int) []byte {
