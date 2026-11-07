@@ -364,8 +364,42 @@ func TestReorderBufferRestoresSequenceOrder(t *testing.T) {
 	}
 }
 
-func TestKCPConnCRCVerifiesAndStripsPacket(t *testing.T) {
-	out := make(chan []byte, 1)
+// TestReorderBufferReleasesALostHoleAfterTheHold pins the bounded wait. Before
+// it, a lost RTP packet parked the reassembler until reorderWindow (256) packets
+// had queued behind the hole — roughly 20 s of silence at the tunnel's real
+// cadence — which is what killed the phone's inbound direction and, earlier, the
+// server's: the carrier reported ready ~28 s late and every tunnel stream timed
+// out waiting for its ack byte. A hole must be given up once reorderHoldTimeout
+// passes, and everything already buffered must be delivered in order.
+func TestReorderBufferReleasesALostHoleAfterTheHold(t *testing.T) {
+	b := newReorderBuffer()
+	if got := b.push(&rtp.Packet{Header: rtp.Header{SequenceNumber: 100}}); len(got) != 1 {
+		t.Fatalf("first push delivered %d packets, want 1", len(got))
+	}
+	if got := b.push(&rtp.Packet{Header: rtp.Header{SequenceNumber: 102}}); len(got) != 0 {
+		t.Fatalf("gap push delivered %d packets, want 0", len(got))
+	}
+	// Inside the hold window the hole is still expected to be a retransmit in
+	// flight, so nothing may be released yet.
+	if got := b.push(&rtp.Packet{Header: rtp.Header{SequenceNumber: 103}}); len(got) != 0 {
+		t.Fatalf("delivered %d packets inside the hold window, want 0", len(got))
+	}
+
+	time.Sleep(reorderHoldTimeout + 100*time.Millisecond)
+
+	got := b.push(&rtp.Packet{Header: rtp.Header{SequenceNumber: 104}})
+	want := []uint16{102, 103, 104}
+	if len(got) != len(want) {
+		t.Fatalf("delivered %d packets after the hold expired, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i].SequenceNumber != want[i] {
+			t.Fatalf("delivered[%d] = %d, want %d", i, got[i].SequenceNumber, want[i])
+		}
+	}
+}
+
+func TestKCPConnCRCVerifiesAndStripsPacket(t *testing.T) {	out := make(chan []byte, 1)
 	hdr := buildEpochHeader(bindingToken("client"), 0x01020304)
 	c := newKCPConn(out, 4, hdr)
 
