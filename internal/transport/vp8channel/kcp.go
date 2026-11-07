@@ -28,16 +28,15 @@ const (
 	// clamped. Stay below that with headroom for KCP overhead (24 bytes).
 	kcpMTU = 1400
 
-	// Send/receive window in segments, sized to the bandwidth-delay product of
-	// the policed video path, NOT to "as much as possible". A large send window
-	// lets the upper layer dump megabytes into KCP instantly; those segments
-	// then sit queued for seconds, so KCP's RTO fires over a standing backlog
-	// and every loss turns into a retransmit storm that starves the control
-	// plane. 128 segments was measured 2026-11-07 and made things worse
-	// (4 KB/s against 38-52 KB/s at 768): with roughly half of the packets lost
-	// on this carrier a window that small cannot keep the pipe busy, so the
-	// queue bound has to come from pacing, not from the window.
-	kcpSndWnd = 768
+	// Send/receive window in segments. The window is the queue the control
+	// probe has to wait behind, so it is one half of the latency/throughput
+	// trade-off and the data budget is the other. Measured 2026-11-07 over
+	// Telemost with a 50 KB/s budget: 768 segments left the probe waiting
+	// 32 s, 384 and 128 were worse on both counts (a session died by liveness
+	// in each), 192 held the control RTT under 570 ms with no liveness teardown
+	// and 23.8 KB/s delivered. The receive window stays generous so the peer is
+	// never the bottleneck.
+	kcpSndWnd = 192
 	kcpRcvWnd = 1024
 
 	// Length prefix for our message framing on top of KCP stream mode.

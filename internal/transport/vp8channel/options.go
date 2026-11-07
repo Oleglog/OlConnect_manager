@@ -14,6 +14,19 @@ const (
 	// but also throttled real tunnel throughput. Keep the knob for manual safe
 	// mode, but do not limit speed unless the user explicitly configures it.
 	defaultMaxBytesPerSec = 0
+
+	// defaultTelemostBytesPerSec is the data budget used for the Telemost
+	// carrier when nothing is configured. Telemost shares one KCP session
+	// between the tunnel data and the control ping/pong, and its SFU loses
+	// roughly half of the packets under load, so an unpaced sender builds a
+	// queue that the probe has to wait behind: measured 2026-11-07, control RTT
+	// went from 226 ms idle to 9-45 s under bulk, four missed pongs tore the
+	// session down mid-transfer, and the achieved rate swung between 3 and
+	// 52 KB/s. At 50 KB/s the same link delivered ~24 KB/s with RTT under 1 s
+	// and no liveness teardown; 90-120 KB/s brought the 27 s RTT and the
+	// teardown back. Raise it with vp8.max_bytes_per_sec if a build is used
+	// against a carrier that can take it.
+	defaultTelemostBytesPerSec = 50_000
 )
 
 // Options tunes the vp8channel transport. Zero values fall back to documented defaults.

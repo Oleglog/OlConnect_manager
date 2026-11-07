@@ -122,6 +122,10 @@ const (
 
 var kcpBatchMagic = [4]byte{'O', 'L', 'K', 'B'} //nolint:gochecknoglobals // wire marker
 
+// carrierTelemost is the auth/provider name whose SFU needs a default data
+// budget (see defaultTelemostBytesPerSec).
+const carrierTelemost = "telemost"
+
 // videoSession is the subset of engine.Session + engine.VideoTrackCapable
 // the vp8channel transport relies on.
 type videoSession interface {
@@ -318,6 +322,13 @@ func newStreamTransport(
 	byteRate := opts.MaxBytesPerSec
 	if byteRate <= 0 {
 		byteRate = defaultMaxBytesPerSec
+	}
+	// Telemost needs a data budget even when nothing is configured: its SFU and
+	// the shared KCP session make an unpaced sender the difference between a
+	// stable tunnel and one that loses its control plane under load. See
+	// defaultTelemostBytesPerSec.
+	if byteRate <= 0 && cfg.Carrier == carrierTelemost {
+		byteRate = defaultTelemostBytesPerSec
 	}
 	// Bytes we may emit per frame tick when a user explicitly enables a rate
 	// cap. With the default zero cap, allow a full VP8 payload each tick so the
