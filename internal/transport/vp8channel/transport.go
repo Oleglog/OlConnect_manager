@@ -155,6 +155,7 @@ type streamTransport struct {
 	segMTU        int
 	segSndWnd     int
 	enableCC      bool
+	coalesce      bool
 
 	// Data-path token bucket. The publisher writes into one KCP session that
 	// also carries the control ping/pong, so an unpaced writer builds a
@@ -372,6 +373,7 @@ func newStreamTransport(
 		segMTU:        segMTU,
 		segSndWnd:     opts.SndWnd,
 		enableCC:      opts.EnableCC,
+		coalesce:      opts.Coalesce,
 		bindingToken:  bindingToken(cfg.RoomURL),
 		localEpoch:    randomEpoch(),
 		peers:         make(map[uint32]*kcpRuntime),
@@ -940,6 +942,13 @@ func (p *streamTransport) writerLoop() {
 			// to one frameInterval of latency per message for zero wire
 			// savings — the batcher drains the queue non-blockingly below.
 			// The data budget, not the tick, is what bounds the rate.
+			//
+			// With vp8.coalesce the opposite is wanted: waiting one interval
+			// lets the batcher collect several KCP segments, which is the only
+			// way a sample can exceed one segment (see the option's comment).
+			if p.coalesce && !p.waitTick(ticker) {
+				return
+			}
 			p.writeTrackSample(p.batchSample(frame, p.perTickBytes))
 			idleTicks = 0
 			if !time.Now().Before(keyframeAt) {
@@ -975,6 +984,17 @@ func (p *streamTransport) writerLoop() {
 
 			p.writeTrackSample(sample)
 		}
+	}
+}
+
+// waitTick waits for the next writer tick and reports false if the transport
+// closed while waiting.
+func (p *streamTransport) waitTick(ticker *time.Ticker) bool {
+	select {
+	case <-p.closeCh:
+		return false
+	case <-ticker.C:
+		return true
 	}
 }
 

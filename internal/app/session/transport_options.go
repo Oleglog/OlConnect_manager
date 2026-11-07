@@ -34,6 +34,7 @@ func buildTransportOptions(cfg Config) transport.Options {
 			EnableCC:       cfg.VP8.EnableCC,
 			MaxBytesPerSec: cfg.VP8.MaxBytesPerSec,
 			SndWnd:         cfg.VP8.SndWnd,
+			Coalesce:       cfg.VP8.Coalesce,
 		}
 	case transportSEI:
 		return seichannel.Options{

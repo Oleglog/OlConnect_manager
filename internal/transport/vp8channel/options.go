@@ -47,6 +47,13 @@ type Options struct {
 	// SndWnd overrides the KCP send window in segments. It bounds the queue the
 	// control probe waits behind. Zero keeps the package default.
 	SndWnd int
+	// Coalesce makes the writer wait one frame interval before emitting a
+	// queued KCP segment, so the batcher can put several segments into one
+	// sample. Without it the immediate write always finds the queue empty and a
+	// sample never carries more than one segment, which makes MaxSampleBytes
+	// dead weight: measured 2026-11-07, samples stayed at the KCP MTU (1152 B)
+	// with max_sample_bytes set to 4 KiB, 8 KiB and 16 KiB alike.
+	Coalesce bool
 }
 
 // TransportOptions marks Options as belonging to the transport options family.

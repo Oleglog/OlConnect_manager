@@ -20,6 +20,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/openlibrecommunity/olcrtc/internal/engine"
+	"github.com/openlibrecommunity/olcrtc/internal/logger"
+	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -324,16 +326,55 @@ func (s *Session) attachPendingVideoTracks() error {
 // drainPublisherRTCP reads feedback the SFU sends for our published track.
 // Without an active reader, Pion's RTCP/interceptor path can stall and the SFU
 // may stop considering the publisher media path alive after its idle watchdog.
+//
+// The same reader now reports what the carrier says about our allocated
+// bandwidth. REMB is the SFU's own estimate for the track we publish, so it is
+// the number that separates "our writer is the ceiling" from "the carrier
+// allocates us this much and no more" — the question the throughput
+// investigation kept circling.
 func (s *Session) drainPublisherRTCP(sender *webrtc.RTPSender) {
 	if sender == nil {
 		return
 	}
 	go func() {
 		buf := make([]byte, 1500)
+		var rembCount, nack, pli, cc int
+		var rembLast, rembMax float64
+		last := time.Now()
 		for {
-			if _, _, err := sender.Read(buf); err != nil {
+			n, _, err := sender.Read(buf)
+			if err != nil {
 				return
 			}
+			pkts, err := rtcp.Unmarshal(buf[:n])
+			if err != nil {
+				continue
+			}
+			for _, pkt := range pkts {
+				switch p := pkt.(type) {
+				case *rtcp.PictureLossIndication:
+					pli++
+				case *rtcp.TransportLayerNack:
+					nack++
+				case *rtcp.TransportLayerCC:
+					cc++
+				case *rtcp.ReceiverEstimatedMaximumBitrate:
+					rembCount++
+					rembLast = float64(p.Bitrate)
+					if rembLast > rembMax {
+						rembMax = rembLast
+					}
+				}
+			}
+			if time.Since(last) < 5*time.Second {
+				continue
+			}
+			if logger.IsVerbose() && rembCount+nack+pli+cc > 0 {
+				logger.Verbosef("goolom publisher rtcp: remb=%d lastRemBps=%.0f maxRemBps=%.0f nack=%d pli=%d cc=%d",
+					rembCount, rembLast, rembMax, nack, pli, cc)
+			}
+			rembCount, nack, pli, cc = 0, 0, 0, 0
+			last = time.Now()
 		}
 	}()
 }
