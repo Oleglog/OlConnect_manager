@@ -30,6 +30,8 @@ func buildTransportOptions(cfg Config) transport.Options {
 			FPS:            cfg.VP8.FPS,
 			BatchSize:      cfg.VP8.BatchSize,
 			MaxSampleBytes: cfg.VP8.MaxSampleBytes,
+			MTU:            cfg.VP8.MTU,
+			EnableCC:       cfg.VP8.EnableCC,
 		}
 	case transportSEI:
 		return seichannel.Options{

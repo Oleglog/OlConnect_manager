@@ -152,6 +152,8 @@ type streamTransport struct {
 	frameInterval time.Duration
 	batchSize     int
 	perTickBytes  int
+	segMTU        int
+	enableCC      bool
 
 	// writeMu serializes WriteSample across the keepalive writerLoop and every
 	// per-peer writer pump, and guards lastWrite so the shared track's RTP
@@ -323,6 +325,15 @@ func newStreamTransport(
 	if perTickBytes < epochHdrLen+kcpLenPrefix {
 		perTickBytes = epochHdrLen + kcpLenPrefix
 	}
+	segMTU := opts.MTU
+	if segMTU <= 0 {
+		segMTU = defaultSegMTU
+	}
+	// A sample is epochHdrLen + batch framing + one KCP segment, so an MTU this
+	// small would produce samples that cannot hold a packet at all.
+	if segMTU < epochHdrLen+kcpLenPrefix {
+		segMTU = epochHdrLen + kcpLenPrefix
+	}
 
 	tr := &streamTransport{
 		stream:        stream,
@@ -336,6 +347,8 @@ func newStreamTransport(
 		frameInterval: time.Second / time.Duration(fps),
 		batchSize:     batchSize,
 		perTickBytes:  perTickBytes,
+		segMTU:        segMTU,
+		enableCC:      opts.EnableCC,
 		bindingToken:  bindingToken(cfg.RoomURL),
 		localEpoch:    randomEpoch(),
 		peers:         make(map[uint32]*kcpRuntime),
@@ -383,7 +396,13 @@ func (p *streamTransport) Connect(ctx context.Context) error {
 	// would deadlock: muxconn.Write spins on CanSend (which checks kcp!=nil)
 	// and KCP was only started lazily on the first incoming peer frame.
 	p.kcpOnce.Do(func() {
-		rt, err := startKCP(p.outbound, p.onData, p.epochHeader())
+		rt, err := startKCPWith(kcpParams{
+			out:      p.outbound,
+			onData:   p.onData,
+			epochHdr: p.epochHeader(),
+			mtu:      p.segMTU,
+			enableCC: p.enableCC,
+		})
 		if err != nil {
 			logger.Infof("vp8channel: startKCP failed: %v", err)
 			return
@@ -919,7 +938,13 @@ func (p *streamTransport) restartKCP(epochHdr [epochHdrLen]byte) {
 	if old != nil {
 		old.close()
 	}
-	rt, err := startKCP(p.outbound, p.onData, epochHdr)
+	rt, err := startKCPWith(kcpParams{
+		out:      p.outbound,
+		onData:   p.onData,
+		epochHdr: epochHdr,
+		mtu:      p.segMTU,
+		enableCC: p.enableCC,
+	})
 	if err != nil {
 		return
 	}
@@ -1272,11 +1297,17 @@ func (p *streamTransport) getOrCreatePeerKCP(epoch uint32) *kcpRuntime {
 	peerID := formatPeerID(epoch)
 	out := make(chan []byte, outboundQueueSize)
 	hdr := buildEpochHeader(p.bindingToken, p.localEpochValue())
-	rt, err := startKCP(out, func(data []byte) {
-		if p.onPeerData != nil {
-			p.onPeerData(peerID, data)
-		}
-	}, hdr)
+	rt, err := startKCPWith(kcpParams{
+		out: out,
+		onData: func(data []byte) {
+			if p.onPeerData != nil {
+				p.onPeerData(peerID, data)
+			}
+		},
+		epochHdr: hdr,
+		mtu:      p.segMTU,
+		enableCC: p.enableCC,
+	})
 	if err != nil {
 		logger.Warnf("vp8channel: startKCP for peer 0x%08x failed: %v", epoch, err)
 		return nil

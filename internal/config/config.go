@@ -146,6 +146,11 @@ type VP8 struct {
 	// peer discards the whole frame if any of them is lost, so this bounds the
 	// all-or-nothing unit. Zero keeps the transport default.
 	MaxSampleBytes int `yaml:"max_sample_bytes"`
+	// MTU is the KCP segment size, which also decides whether a sample fits in
+	// one RTP packet. Zero keeps the transport default.
+	MTU int `yaml:"mtu"`
+	// CC turns KCP's loss-based congestion control on. Off by default.
+	CC bool `yaml:"cc"`
 }
 
 // SEI tunes the seichannel transport.
@@ -310,6 +315,8 @@ func Apply(dst session.Config, f File) session.Config {
 	dst.VP8.FPS = pickInt(dst.VP8.FPS, f.VP8.FPS)
 	dst.VP8.BatchSize = pickInt(dst.VP8.BatchSize, f.VP8.BatchSize)
 	dst.VP8.MaxSampleBytes = pickInt(dst.VP8.MaxSampleBytes, f.VP8.MaxSampleBytes)
+	dst.VP8.MTU = pickInt(dst.VP8.MTU, f.VP8.MTU)
+	dst.VP8.CC = dst.VP8.CC || f.VP8.CC
 	dst.SEI.FPS = pickInt(dst.SEI.FPS, f.SEI.FPS)
 	dst.SEI.BatchSize = pickInt(dst.SEI.BatchSize, f.SEI.BatchSize)
 	dst.SEI.FragmentSize = pickInt(dst.SEI.FragmentSize, f.SEI.FragmentSize)
@@ -370,6 +377,8 @@ func ApplyProfile(base session.Config, p Profile) session.Config {
 	dst.VP8.FPS = overlayInt(dst.VP8.FPS, p.VP8.FPS)
 	dst.VP8.BatchSize = overlayInt(dst.VP8.BatchSize, p.VP8.BatchSize)
 	dst.VP8.MaxSampleBytes = overlayInt(dst.VP8.MaxSampleBytes, p.VP8.MaxSampleBytes)
+	dst.VP8.MTU = overlayInt(dst.VP8.MTU, p.VP8.MTU)
+	dst.VP8.CC = dst.VP8.CC || p.VP8.CC
 	dst.SEI.FPS = overlayInt(dst.SEI.FPS, p.SEI.FPS)
 	dst.SEI.BatchSize = overlayInt(dst.SEI.BatchSize, p.SEI.BatchSize)
 	dst.SEI.FragmentSize = overlayInt(dst.SEI.FragmentSize, p.SEI.FragmentSize)

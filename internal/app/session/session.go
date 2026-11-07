@@ -168,6 +168,11 @@ type VP8Config struct {
 	// MaxSampleBytes bounds one sample (= one VP8 frame on the wire). Zero
 	// keeps the transport default.
 	MaxSampleBytes int
+	// MTU is the KCP segment size, which also decides how many RTP packets one
+	// sample spans. Zero keeps the transport default.
+	MTU int
+	// EnableCC turns KCP's loss-based congestion control on.
+	EnableCC bool
 }
 
 // SEIConfig holds tunables for the seichannel transport.

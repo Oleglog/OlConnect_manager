@@ -26,6 +26,14 @@ type Options struct {
 	// MaxSampleBytes caps one sample (one VP8 frame on the wire). Zero keeps
 	// the package default.
 	MaxSampleBytes int
+	// MTU is the KCP segment size. It caps the wire sample directly (a sample
+	// is one KCP segment plus framing), so it decides whether a sample fits in
+	// one RTP packet. Zero keeps the package default.
+	MTU int
+	// EnableCC turns KCP's loss-based congestion control on. It is off by
+	// default because the carrier's policer, not the network, used to be the
+	// constraint; on a genuinely lossy path it stops the retransmit storm.
+	EnableCC bool
 }
 
 // TransportOptions marks Options as belonging to the transport options family.

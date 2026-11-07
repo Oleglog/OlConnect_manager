@@ -25,6 +25,10 @@
 #   OLCRTC_TRAFFIC_MIN_DELAY optional: send pacing min delay, Go duration (e.g. 1ms).
 #   OLCRTC_TRAFFIC_MAX_DELAY optional: send pacing max delay, Go duration (e.g. 3ms).
 #   OLCRTC_VP8_FPS           optional: VP8 FPS (default 60, only for vp8channel)
+#   OLCRTC_VP8_MTU           optional: KCP segment size (default 1080). Decides
+#                                       whether a sample fits in one RTP packet.
+#   OLCRTC_VP8_MAX_SAMPLE    optional: cap on one sample in bytes
+#   OLCRTC_VP8_CC            optional: set to 1 to enable KCP congestion control
 #   OLCRTC_VP8_BATCH         optional: VP8 batch size (default 64, only for vp8channel)
 #   OLCRTC_SEI_FPS           optional: SEI FPS (default 60)
 #   OLCRTC_SEI_BATCH         optional: SEI batch size (default 64)
@@ -347,6 +351,17 @@ vp8:
   fps: ${vp8_fps}
   batch_size: ${vp8_batch}
 EOF
+    # Optional: KCP segment size (decides whether one sample fits in one RTP
+    # packet) and KCP loss-based congestion control.
+    if [ -n "${OLCRTC_VP8_MTU:-}" ]; then
+        echo "  mtu: ${OLCRTC_VP8_MTU}" >> "$CONFIG_FILE"
+    fi
+    if [ -n "${OLCRTC_VP8_MAX_SAMPLE:-}" ]; then
+        echo "  max_sample_bytes: ${OLCRTC_VP8_MAX_SAMPLE}" >> "$CONFIG_FILE"
+    fi
+    if [ -n "${OLCRTC_VP8_CC:-}" ] && [ "${OLCRTC_VP8_CC}" != "0" ] && [ "${OLCRTC_VP8_CC}" != "false" ]; then
+        echo "  cc: true" >> "$CONFIG_FILE"
+    fi
 fi
 
 # SEI options

@@ -47,6 +47,16 @@ const (
 	// framing sidesteps that bug entirely.
 	kcpLenPrefix = 4
 
+	// defaultSegMTU is the segment size the transport asks for when the
+	// operator sets no vp8.mtu. KCP in stream mode coalesces queued writes into
+	// segments up to the MTU, so this — not the application payload cap — is
+	// what decides the size of one wire sample: a sample is one segment plus
+	// epochHdrLen + batch framing, and 1080 + 38 stays inside one RTP packet at
+	// a 1200-byte path MTU. A sample that fragments is all-or-nothing at the
+	// peer's reassembler: one lost packet discards the whole frame, so every
+	// fragmented sample costs a full KCP retransmission round.
+	defaultSegMTU = 1080
+
 	// Hard cap on a single message. Anything larger would require an
 	// unbounded reassembly buffer on the receiver and is almost certainly
 	// a protocol error upstream.
@@ -79,7 +89,33 @@ type kcpRuntime struct {
 	closeOnce sync.Once
 }
 
+// kcpParams carries the per-session tuning the transport configures. Zero
+// fields keep the package defaults, so callers that only need the wire format
+// (tests) can leave them out.
+type kcpParams struct {
+	out      chan<- []byte
+	onData   func([]byte)
+	epochHdr [epochHdrLen]byte
+	// mtu caps one KCP segment and therefore one wire sample.
+	mtu int
+	// enableCC turns KCP's loss-based congestion control on.
+	enableCC bool
+}
+
 func startKCP(out chan<- []byte, onData func([]byte), epochHdr [epochHdrLen]byte) (*kcpRuntime, error) {
+	return startKCPWith(kcpParams{out: out, onData: onData, epochHdr: epochHdr})
+}
+
+func startKCPWith(p kcpParams) (*kcpRuntime, error) {
+	out, onData, epochHdr := p.out, p.onData, p.epochHdr
+	mtu := p.mtu
+	if mtu <= 0 {
+		mtu = kcpMTU
+	}
+	noCongestionControl := 1
+	if p.enableCC {
+		noCongestionControl = 0
+	}
 	c := newKCPConn(out, inboundQueueSize, epochHdr)
 
 	sess, err := kcp.NewConn3(kcpConvID, fakeUDPAddr(), nil, 0, 0, c)
@@ -88,17 +124,15 @@ func startKCP(out chan<- []byte, onData func([]byte), epochHdr [epochHdrLen]byte
 		return nil, fmt.Errorf("kcp new conn: %w", err)
 	}
 
-	// nodelay=1, interval=5ms, fast resend=2, congestion control OFF (nc=1).
-	// KCP does NOT regulate the send rate here — the writerLoop byte pacer
-	// does, fed at a fixed rate just under the carrier's policer knee. KCP's
-	// own loss-based congestion control is the wrong controller for a hard
-	// policer: with nc=0 the unavoidable ~4% drops collapsed cwnd and starved
-	// the wire to ~45 KiB/s. With nc=1 KCP just keeps the BDP-sized window
-	// full and retransmits the few losses; the pacer caps the rate so we
-	// never overdrive the policer into its collapse zone.
-	sess.SetNoDelay(1, 5, 2, 1)
+	// nodelay=1, interval=5ms, fast resend=2, congestion control OFF by default.
+	// KCP does not regulate the send rate here — the writer paces the frames.
+	// KCP's own loss-based congestion control is the wrong controller when the
+	// constraint is a policer rather than the network: with cc on, the
+	// unavoidable drops collapsed cwnd and starved the wire. With cc off KCP
+	// keeps the window full and retransmits the losses.
+	sess.SetNoDelay(1, 5, 2, noCongestionControl)
 	sess.SetWindowSize(kcpSndWnd, kcpRcvWnd)
-	sess.SetMtu(kcpMTU)
+	sess.SetMtu(mtu)
 	// Upstream marked SetStreamMode deprecated without providing a replacement;
 	// stream framing is still required for our wire format.
 	sess.SetStreamMode(true) //nolint:staticcheck // SA1019: no replacement upstream.
