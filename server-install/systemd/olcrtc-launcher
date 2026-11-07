@@ -369,6 +369,9 @@ EOF
     if [ -n "${OLCRTC_VP8_MAX_BYTES_PER_SEC:-}" ]; then
         echo "  max_bytes_per_sec: ${OLCRTC_VP8_MAX_BYTES_PER_SEC}" >> "$CONFIG_FILE"
     fi
+    if [ -n "${OLCRTC_VP8_SNDWND:-}" ]; then
+        echo "  sndwnd: ${OLCRTC_VP8_SNDWND}" >> "$CONFIG_FILE"
+    fi
 fi
 
 # SEI options

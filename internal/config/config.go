@@ -156,6 +156,9 @@ type VP8 struct {
 	// data, so an explicit cap is what keeps the tunnel alive under load. Zero
 	// means unlimited.
 	MaxBytesPerSec int `yaml:"max_bytes_per_sec"`
+	// SndWnd overrides the KCP send window in segments; it bounds the queue the
+	// control probe waits behind. Zero keeps the transport default.
+	SndWnd int `yaml:"sndwnd"`
 }
 
 // SEI tunes the seichannel transport.
@@ -323,6 +326,7 @@ func Apply(dst session.Config, f File) session.Config {
 	dst.VP8.MTU = pickInt(dst.VP8.MTU, f.VP8.MTU)
 	dst.VP8.EnableCC = dst.VP8.EnableCC || f.VP8.CC
 	dst.VP8.MaxBytesPerSec = pickInt(dst.VP8.MaxBytesPerSec, f.VP8.MaxBytesPerSec)
+	dst.VP8.SndWnd = pickInt(dst.VP8.SndWnd, f.VP8.SndWnd)
 	dst.SEI.FPS = pickInt(dst.SEI.FPS, f.SEI.FPS)
 	dst.SEI.BatchSize = pickInt(dst.SEI.BatchSize, f.SEI.BatchSize)
 	dst.SEI.FragmentSize = pickInt(dst.SEI.FragmentSize, f.SEI.FragmentSize)
@@ -386,6 +390,7 @@ func ApplyProfile(base session.Config, p Profile) session.Config {
 	dst.VP8.MTU = overlayInt(dst.VP8.MTU, p.VP8.MTU)
 	dst.VP8.EnableCC = dst.VP8.EnableCC || p.VP8.CC
 	dst.VP8.MaxBytesPerSec = overlayInt(dst.VP8.MaxBytesPerSec, p.VP8.MaxBytesPerSec)
+	dst.VP8.SndWnd = overlayInt(dst.VP8.SndWnd, p.VP8.SndWnd)
 	dst.SEI.FPS = overlayInt(dst.SEI.FPS, p.SEI.FPS)
 	dst.SEI.BatchSize = overlayInt(dst.SEI.BatchSize, p.SEI.BatchSize)
 	dst.SEI.FragmentSize = overlayInt(dst.SEI.FragmentSize, p.SEI.FragmentSize)

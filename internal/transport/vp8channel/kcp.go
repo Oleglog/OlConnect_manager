@@ -100,6 +100,10 @@ type kcpParams struct {
 	mtu int
 	// enableCC turns KCP's loss-based congestion control on.
 	enableCC bool
+	// sndWnd overrides the send window in segments; zero keeps kcpSndWnd.
+	// The window is the queue the control probe has to wait behind, so it is
+	// the other half of the latency/throughput trade-off.
+	sndWnd int
 }
 
 func startKCP(out chan<- []byte, onData func([]byte), epochHdr [epochHdrLen]byte) (*kcpRuntime, error) {
@@ -116,6 +120,10 @@ func startKCPWith(p kcpParams) (*kcpRuntime, error) {
 	if p.enableCC {
 		noCongestionControl = 0
 	}
+	sndWnd := p.sndWnd
+	if sndWnd <= 0 {
+		sndWnd = kcpSndWnd
+	}
 	c := newKCPConn(out, inboundQueueSize, epochHdr)
 
 	sess, err := kcp.NewConn3(kcpConvID, fakeUDPAddr(), nil, 0, 0, c)
@@ -131,7 +139,7 @@ func startKCPWith(p kcpParams) (*kcpRuntime, error) {
 	// unavoidable drops collapsed cwnd and starved the wire. With cc off KCP
 	// keeps the window full and retransmits the losses.
 	sess.SetNoDelay(1, 5, 2, noCongestionControl)
-	sess.SetWindowSize(kcpSndWnd, kcpRcvWnd)
+	sess.SetWindowSize(sndWnd, kcpRcvWnd)
 	sess.SetMtu(mtu)
 	// Upstream marked SetStreamMode deprecated without providing a replacement;
 	// stream framing is still required for our wire format.

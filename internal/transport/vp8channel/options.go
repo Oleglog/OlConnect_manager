@@ -34,6 +34,9 @@ type Options struct {
 	// default because the carrier's policer, not the network, used to be the
 	// constraint; on a genuinely lossy path it stops the retransmit storm.
 	EnableCC bool
+	// SndWnd overrides the KCP send window in segments. It bounds the queue the
+	// control probe waits behind. Zero keeps the package default.
+	SndWnd int
 }
 
 // TransportOptions marks Options as belonging to the transport options family.

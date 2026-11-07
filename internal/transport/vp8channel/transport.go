@@ -153,6 +153,7 @@ type streamTransport struct {
 	batchSize     int
 	perTickBytes  int
 	segMTU        int
+	segSndWnd     int
 	enableCC      bool
 
 	// Data-path token bucket. The publisher writes into one KCP session that
@@ -362,6 +363,7 @@ func newStreamTransport(
 		batchSize:     batchSize,
 		perTickBytes:  perTickBytes,
 		segMTU:        segMTU,
+		segSndWnd:     opts.SndWnd,
 		enableCC:      opts.EnableCC,
 		bindingToken:  bindingToken(cfg.RoomURL),
 		localEpoch:    randomEpoch(),
@@ -426,6 +428,7 @@ func (p *streamTransport) Connect(ctx context.Context) error {
 			epochHdr: p.epochHeader(),
 			mtu:      p.segMTU,
 			enableCC: p.enableCC,
+			sndWnd:   p.segSndWnd,
 		})
 		if err != nil {
 			logger.Infof("vp8channel: startKCP failed: %v", err)
@@ -1029,6 +1032,7 @@ func (p *streamTransport) restartKCP(epochHdr [epochHdrLen]byte) {
 		epochHdr: epochHdr,
 		mtu:      p.segMTU,
 		enableCC: p.enableCC,
+		sndWnd:   p.segSndWnd,
 	})
 	if err != nil {
 		return
@@ -1392,6 +1396,7 @@ func (p *streamTransport) getOrCreatePeerKCP(epoch uint32) *kcpRuntime {
 		epochHdr: hdr,
 		mtu:      p.segMTU,
 		enableCC: p.enableCC,
+		sndWnd:   p.segSndWnd,
 	})
 	if err != nil {
 		logger.Warnf("vp8channel: startKCP for peer 0x%08x failed: %v", epoch, err)

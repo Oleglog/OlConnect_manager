@@ -176,6 +176,8 @@ type VP8Config struct {
 	// MaxBytesPerSec caps the data rate fed to the track (keepalives excluded).
 	// Zero means unlimited.
 	MaxBytesPerSec int
+	// SndWnd overrides the KCP send window in segments. Zero keeps the default.
+	SndWnd int
 }
 
 // SEIConfig holds tunables for the seichannel transport.
