@@ -33,8 +33,10 @@ const (
 type Options struct {
 	FPS       int
 	BatchSize int
-	// MaxBytesPerSec caps the wire byte-rate fed to the video track. Zero means
-	// unlimited unless the package default is changed by a build.
+	// MaxBytesPerSec caps the data rate handed to KCP. Zero means "unset" and
+	// falls back to the package default, and for the Telemost carrier to the
+	// measured budget in defaultTelemostBytesPerSec; a negative value means
+	// explicitly unlimited.
 	MaxBytesPerSec int
 	// MaxSampleBytes caps one sample (one VP8 frame on the wire). Zero keeps
 	// the package default.

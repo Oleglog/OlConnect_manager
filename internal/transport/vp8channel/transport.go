@@ -319,16 +319,21 @@ func newStreamTransport(
 	if batchSize <= 0 {
 		batchSize = defaultBatchSize
 	}
+	// A negative value means "explicitly unlimited": it is how an operator turns
+	// off the carrier default. Zero means "unset", which falls back to the
+	// package default and, for Telemost, to its measured budget.
 	byteRate := opts.MaxBytesPerSec
-	if byteRate <= 0 {
+	if byteRate < 0 {
+		byteRate = 0
+	} else if byteRate == 0 {
 		byteRate = defaultMaxBytesPerSec
-	}
-	// Telemost needs a data budget even when nothing is configured: its SFU and
-	// the shared KCP session make an unpaced sender the difference between a
-	// stable tunnel and one that loses its control plane under load. See
-	// defaultTelemostBytesPerSec.
-	if byteRate <= 0 && cfg.Carrier == carrierTelemost {
-		byteRate = defaultTelemostBytesPerSec
+		// Telemost needs a data budget even when nothing is configured: its SFU
+		// and the shared KCP session make an unpaced sender the difference
+		// between a stable tunnel and one that loses its control plane under
+		// load. See defaultTelemostBytesPerSec.
+		if byteRate <= 0 && cfg.Carrier == carrierTelemost {
+			byteRate = defaultTelemostBytesPerSec
+		}
 	}
 	// Bytes we may emit per frame tick when a user explicitly enables a rate
 	// cap. With the default zero cap, allow a full VP8 payload each tick so the
@@ -559,6 +564,18 @@ func (p *streamTransport) Send(data []byte) error {
 		return ErrTransportClosed
 	}
 
+	// The data budget is applied HERE, before KCP, and not in the writer. Every
+	// outgoing KCP packet — data, ACK and control ping alike — passes through
+	// the writer's outbound queue in order, so a budget applied at the writer
+	// only drains that queue more slowly; it cannot shorten it, and the control
+	// probe keeps waiting behind megabytes the upper layer already pushed into
+	// KCP. Metering the application payload keeps KCP's buffer — and therefore
+	// the writer's queue — shallow, so a control frame reaches the wire within a
+	// few tens of milliseconds instead of tens of seconds.
+	if !p.waitForBudget(len(data)) {
+		return ErrTransportClosed
+	}
+
 	return rt.send(data)
 }
 
@@ -582,6 +599,10 @@ func (p *streamTransport) SendTo(peerID string, data []byte) error {
 		// Record who asked, how much, and whether the epoch ever existed.
 		logger.Infof("vp8channel: SendTo unknown peer epoch=0x%08x bytes=%d knownPeers=%d",
 			epoch, len(data), known)
+		return ErrTransportClosed
+	}
+	// Same budget as Send: see the note there for why it belongs before KCP.
+	if !p.waitForBudget(len(data)) {
 		return ErrTransportClosed
 	}
 	return rt.send(data)
@@ -856,20 +877,9 @@ func (p *streamTransport) peerCount() int {
 	return len(p.peers)
 }
 
-// writeDataSample hands one data sample to the track after waiting for the
-// configured data budget. It applies back-pressure all the way up: the writer
-// stops draining `outbound`, KCP's WriteTo blocks, the send window fills and
-// smux stops reading from the tunnel. That is intentional — the alternative is
-// a standing queue that the control probe has to wait behind.
-func (p *streamTransport) writeDataSample(sample []byte) {
-	if !p.waitForBudget(len(sample)) {
-		return
-	}
-	p.writeTrackSample(sample)
-}
-
 // waitForBudget blocks until n bytes fit in the data budget and reports false
-// if the transport closed while waiting.
+// if the transport closed while waiting. The budget is applied on the send path
+// (Send/SendTo), not here in the writer — see the note in Send.
 func (p *streamTransport) waitForBudget(n int) bool {
 	if p.limRate <= 0 {
 		return true
@@ -939,7 +949,7 @@ func (p *streamTransport) writerLoop() {
 			// to one frameInterval of latency per message for zero wire
 			// savings — the batcher drains the queue non-blockingly below.
 			// The data budget, not the tick, is what bounds the rate.
-			p.writeDataSample(p.batchSample(frame, p.perTickBytes))
+			p.writeTrackSample(p.batchSample(frame, p.perTickBytes))
 			idleTicks = 0
 			if !time.Now().Before(keyframeAt) {
 				keyframeAt = time.Now().Add(2 * time.Second)
@@ -972,7 +982,7 @@ func (p *streamTransport) writerLoop() {
 				continue
 			}
 
-			p.writeDataSample(sample)
+			p.writeTrackSample(sample)
 		}
 	}
 }
@@ -1459,7 +1469,7 @@ func (p *streamTransport) peerWriterPump(stop chan struct{}, out chan []byte) {
 			if !ok {
 				return
 			}
-			p.writeDataSample(p.batchSampleFrom(out, frame, p.perTickBytes))
+			p.writeTrackSample(p.batchSampleFrom(out, frame, p.perTickBytes))
 		case <-p.closeCh:
 			return
 		case <-stop:

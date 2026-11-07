@@ -151,10 +151,11 @@ type VP8 struct {
 	MTU int `yaml:"mtu"`
 	// CC turns KCP's loss-based congestion control on. Off by default.
 	CC bool `yaml:"cc"`
-	// MaxBytesPerSec caps the data rate fed to the track, keepalives excluded.
-	// A deep queue in the carrier pushes the control probe behind the bulk
-	// data, so an explicit cap is what keeps the tunnel alive under load. Zero
-	// means unlimited.
+	// MaxBytesPerSec caps the data rate handed to the carrier, keepalives
+	// excluded. A deep queue in the carrier pushes the control probe behind the
+	// bulk data, so an explicit budget is what keeps the tunnel alive under
+	// load. Zero keeps the transport default (Telemost has a measured one);
+	// a negative value means explicitly unlimited.
 	MaxBytesPerSec int `yaml:"max_bytes_per_sec"`
 	// SndWnd overrides the KCP send window in segments; it bounds the queue the
 	// control probe waits behind. Zero keeps the transport default.
