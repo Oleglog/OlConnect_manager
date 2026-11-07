@@ -213,13 +213,15 @@ func RunWithReady(ctx context.Context, cfg Config, onReady func()) error {
 	return nil
 }
 
-// bringUpAttempts bounds the initial bring-up retries. A single lost frame on
-// a lossy SFU video carrier used to end the process: the handshake reader saw
-// a different message than SERVER_WELCOME (field log: "handshake client:
+// bringUpAttempts bounds the initial bring-up retries. A single lost frame on a
+// lossy SFU video carrier used to end the process: the handshake reader saw a
+// different message than SERVER_WELCOME (field log: "handshake client:
 // unexpected handshake message: got CONTROL_PING") and Run returned the error,
-// so the SOCKS listener never came up and nothing retried. Frame loss at the
-// carrier layer is normal and recoverable, so retry the bring-up; only a real
-// rejection from the server is fatal.
+// so the SOCKS listener never came up and nothing retried. Only a mangled
+// handshake frame is retried, because only that class is a carrier artefact.
+// Everything else stays fail-fast: the supervisor relies on a broken carrier
+// failing immediately so it can move to the next profile, and a rejected key or
+// a version mismatch will never succeed on a retry.
 const (
 	bringUpAttempts   = 5
 	bringUpRetryDelay = time.Second
@@ -230,6 +232,15 @@ const (
 func fatalBringUpError(err error) bool {
 	return errors.Is(err, handshake.ErrRejected) ||
 		errors.Is(err, handshake.ErrProtocolVersion)
+}
+
+// mangledHandshakeError reports whether the tunnel handshake read a frame it
+// cannot accept. A hole in the carrier's byte stream shows up exactly this way
+// (a control frame arriving where SERVER_WELCOME belongs, or a length prefix
+// that no longer lines up), and a fresh attempt usually gets through.
+func mangledHandshakeError(err error) bool {
+	return errors.Is(err, handshake.ErrUnexpectedMessage) ||
+		errors.Is(err, handshake.ErrFrameTooLarge)
 }
 
 func (c *Client) bringUpWithRetry(
@@ -244,7 +255,7 @@ func (c *Client) bringUpWithRetry(
 		if last == nil {
 			return nil
 		}
-		if fatalBringUpError(last) || ctx.Err() != nil {
+		if fatalBringUpError(last) || ctx.Err() != nil || !mangledHandshakeError(last) {
 			return last
 		}
 		logger.Warnf("client bring-up attempt=%d/%d failed: %v", attempt, bringUpAttempts, last)
