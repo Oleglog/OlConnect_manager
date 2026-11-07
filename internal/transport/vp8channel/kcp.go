@@ -30,16 +30,14 @@ const (
 
 	// Send/receive window in segments, sized to the bandwidth-delay product of
 	// the policed video path, NOT to "as much as possible". A large send window
-	// let the upper layer dump megabytes into KCP instantly; with the wire paced
-	// to the carrier's real capacity those segments then sat queued for seconds,
-	// so KCP's RTO fired over a standing backlog and every loss turned into a
-	// retransmit storm that starved the control plane. 128 segments at a
-	// 1080-byte MTU bounds in-flight data to ~138 KB — about one RTT of wire at
-	// 600 KB/s, well above the ~130 KB/s a one-sample-per-tick writer emits — so
-	// the window never becomes a queue. Measured 2026-11-07: 768 segments left a
-	// ~830 KB standing queue and 149 KB/s of pure retransmissions with nothing
-	// for the application.
-	kcpSndWnd = 128
+	// lets the upper layer dump megabytes into KCP instantly; those segments
+	// then sit queued for seconds, so KCP's RTO fires over a standing backlog
+	// and every loss turns into a retransmit storm that starves the control
+	// plane. 128 segments was measured 2026-11-07 and made things worse
+	// (4 KB/s against 38-52 KB/s at 768): with roughly half of the packets lost
+	// on this carrier a window that small cannot keep the pipe busy, so the
+	// queue bound has to come from pacing, not from the window.
+	kcpSndWnd = 768
 	kcpRcvWnd = 1024
 
 	// Length prefix for our message framing on top of KCP stream mode.
