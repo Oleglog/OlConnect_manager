@@ -481,32 +481,30 @@ async function renderDashboard(app, section) {
 }
 
 function renderSystemBlock(sys) {
-  const container = el('div', 'flex flex-col gap-4');
+  const container = el('div', 'sys');
 
-  const banner = el('div', 'card p-5 flex flex-wrap items-center justify-between gap-4');
-  banner.innerHTML = `
-    <div class="flex items-center gap-3.5">
-      <div class="w-11 h-11 rounded-lg flex items-center justify-center flex-shrink-0" style="background:var(--color-lavender-subtle);color:var(--color-primary);border:1px solid var(--color-lavender-border);">
-        ${icon('shield', 24)}
-      </div>
-      <div>
-        <div class="flex items-center gap-2">
-          <h2 class="text-base font-bold" style="color:var(--color-ink);">Сервер OlCRTC</h2>
-          <span class="badge badge-emerald">онлайн</span>
-        </div>
-        <div class="text-xs mt-0.5" style="color:var(--color-ink-subtle);">Версия <span class="font-mono">${sys.version || '-'}</span> · ОС: ${sys.os || '-'}</div>
-      </div>
-    </div>
-    <div class="flex items-center gap-4">
-      <div class="text-right">
-        <div class="text-xs uppercase tracking-wider font-semibold" style="color:var(--color-ink-subtle);">Аптайм</div>
-        <div class="text-sm font-semibold" style="color:var(--color-ink);">${sys.uptime || '-'}</div>
-      </div>
-    </div>
-  `;
+  // The banner is one line of identity plus the one number a person opens this
+  // screen for: uptime. The lavender icon slab and the "онлайн" pill are gone;
+  // the state is a word with the same vocabulary the channels use.
+  const banner = el('section', 'sys-banner');
+  const identity = el('div', 'sys-id');
+  const titleLine = el('div', 'sys-title');
+  titleLine.appendChild(el('h2', 'sys-name', 'Сервер olcRTC'));
+  titleLine.appendChild(el('span', 'sys-state is-live', 'онлайн'));
+  identity.appendChild(titleLine);
+  const verLine = el('div', 'sys-line');
+  verLine.appendChild(document.createTextNode('Версия '));
+  verLine.appendChild(el('span', 'is-mono', sys.version || '-'));
+  verLine.appendChild(document.createTextNode(', ОС: ' + (sys.os || '-')));
+  identity.appendChild(verLine);
+  banner.appendChild(identity);
+
+  const uptime = el('div', 'sys-uptime');
+  uptime.appendChild(el('div', 'sys-k', 'Аптайм'));
+  uptime.appendChild(el('div', 'sys-v', sys.uptime || '-'));
+  banner.appendChild(uptime);
   container.appendChild(banner);
 
-  const grid = el('div', 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3');
   const items = [
     { label: 'Активные пиры', val: String(Number(sys.active_peers) || 0), id: 'active-peer-count', highlight: true },
     { label: 'Инстансы', val: (sys.instances_running || 0) + ' / ' + (sys.instances_total || 0) },
@@ -516,23 +514,19 @@ function renderSystemBlock(sys) {
     { label: 'Подписки', val: sys.sub_enabled ? (sys.sub_running ? 'Включены' : 'Сбой') : 'Выключены' },
   ];
 
+  // Facts, not six cards: one framed grid whose values line up, so the numbers
+  // can be compared down the column instead of being found inside boxes.
+  const facts = el('section', 'sys-facts');
   items.forEach(it => {
-    const tile = el('div', 'metric-card flex flex-col justify-between');
-    const lbl = el('div', 'text-xs uppercase tracking-wider mb-1 font-semibold');
-    lbl.style.color = 'var(--color-ink-subtle)';
-    lbl.textContent = it.label;
-
-    const val = el('div', 'text-sm font-semibold truncate' + (it.copy ? ' copyable' : ''));
-    val.style.color = it.highlight ? 'var(--color-primary)' : 'var(--color-ink)';
+    const fact = el('div', 'sys-fact');
+    fact.appendChild(el('div', 'sys-k', it.label));
+    const val = el('div', 'sys-v' + (it.highlight ? ' is-lead' : '') + (it.copy ? ' copyable' : ''));
     if (it.id) val.id = it.id;
     val.textContent = it.val;
-
-    tile.appendChild(lbl);
-    tile.appendChild(val);
-    grid.appendChild(tile);
+    fact.appendChild(val);
+    facts.appendChild(fact);
   });
-
-  container.appendChild(grid);
+  container.appendChild(facts);
   return container;
 }
 
