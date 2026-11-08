@@ -22,6 +22,11 @@ type Config struct {
 	Password     string
 	Domain       string
 	SubPort      int
+	// SubListen overrides the address the embedded subscription server binds
+	// to. It defaults to 127.0.0.1:SubPort - the address Caddy proxies the
+	// public /sub path to - because an ephemeral port moves on every restart
+	// and the public path then answers 502.
+	SubListen    string
 	SubPublicURL string
 	TLSDir       string
 	ACMEEmail    string

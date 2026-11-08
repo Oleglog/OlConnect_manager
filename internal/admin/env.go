@@ -22,6 +22,15 @@ func ReadMirrorConfig(configDir string) (enabled bool, provider, oauthToken, bas
 	return
 }
 
+// ReadMirrorProxy reads the SOCKS/HTTP proxy for mirror uploads
+// (OLCRTC_SUB_MIRROR_PROXY, e.g. 127.0.0.1:40000 or socks5://127.0.0.1:40000).
+// cloud-api.yandex.net is unreachable over the server's direct egress on the
+// stand, so a mirror without a proxy times out instead of uploading.
+func ReadMirrorProxy(configDir string) string {
+	vals := ReadInstanceEnv(InstanceEnvPath(configDir, 0))
+	return strings.TrimSpace(vals["OLCRTC_SUB_MIRROR_PROXY"])
+}
+
 // WriteMirrorConfig overlays the four OLCRTC_SUB_MIRROR_* keys into the main
 // instance env file, preserving existing keys. The file is root:olcrtc 0640;
 // we re-write through WriteInstanceEnv and re-apply 0640 since OAuth token is

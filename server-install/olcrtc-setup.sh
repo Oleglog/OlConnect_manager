@@ -627,6 +627,7 @@ OLCRTC_VP8_FPS=${vp8_fps:-120}
 OLCRTC_VP8_BATCH=${vp8_batch:-64}
 OLCRTC_SUB_ENABLED=$SUB_ENABLED_VAL
 OLCRTC_SUB_PORT=$SUB_PORT
+OLCRTC_SUB_MIRROR_PROXY=
 EOF
 chown root:olcrtc "$ENV_FILE"
 chmod 0640 "$ENV_FILE"
@@ -652,6 +653,7 @@ OLCRTC_ADMIN_USER=${ADMIN_USER}
 OLCRTC_ADMIN_PASS=${ADMIN_PASS}
 OLCRTC_ADMIN_DOMAIN=
 OLCRTC_SUB_PORT=$SUB_PORT
+OLCRTC_SUB_LISTEN=127.0.0.1:$SUB_PORT
 OLCRTC_SUB_PUBLIC_URL=
 EOF
 chmod 0600 "$ADMIN_ENV"
@@ -738,6 +740,7 @@ ExecStart=/usr/local/bin/olcrtc-admin \
     -port ${OLCRTC_ADMIN_PORT} \
     -domain "${OLCRTC_ADMIN_DOMAIN}" \
     -sub-port ${OLCRTC_SUB_PORT} \
+    -sub-listen "${OLCRTC_SUB_LISTEN}" \
     -sub-public-url "${OLCRTC_SUB_PUBLIC_URL}" \
     -tls-dir /var/lib/olcrtc/admin-tls
 Restart=on-failure

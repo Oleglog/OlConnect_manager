@@ -20,6 +20,7 @@ func main() {
 		port      = flag.Int("port", 0, "HTTPS port (0 = auto)")
 		domain    = flag.String("domain", "", "Domain for Let's Encrypt (empty = self-signed)")
 		subPort      = flag.Int("sub-port", 2096, "Subscription API port for proxying")
+		subListen    = flag.String("sub-listen", "", "host:port the embedded subscription server binds to (e.g. 127.0.0.1:2097); empty = ephemeral port")
 		subPublicURL = flag.String("sub-public-url", "", "Public base URL for subscriptions, e.g. https://sub.example.com")
 		tlsDir       = flag.String("tls-dir", "/var/lib/olcrtc/admin-tls", "TLS certificates directory")
 		acmeEmail = flag.String("acme-email", "", "Email for Let's Encrypt account")
@@ -77,6 +78,7 @@ func main() {
 		Password:  password,
 		Domain:       *domain,
 		SubPort:      *subPort,
+		SubListen:    strings.Trim(*subListen, `"' `),
 		SubPublicURL: *subPublicURL,
 		TLSDir:       *tlsDir,
 		ACMEEmail: *acmeEmail,
