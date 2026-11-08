@@ -12,13 +12,16 @@ package admin
 //	   пытается его перезапустить.
 //	I  юнит остановлен: ActiveState=inactive и не failed — его выключили руками.
 //	U  канал рвался: юнит перезапускался в эту минуту (NRestarts вырос или
-//	   сменился ActiveEnterTimestamp) либо в журнале минуты есть reconnect.
+//	   сменился ActiveEnterTimestamp), в журнале минуты есть reconnect, либо это
+//	   вторая подряд минута, где клиенты есть, а трафика нет (первая такая минута
+//	   ещё L: одна минута тишины — пауза, две — простой).
 //	P  канал на пределе: в журнале минуты есть отказ носителя — RATE_LIMITED,
 //	   «write refused» или 429.
-//	L  канал жив: юнит активен, и в эту минуту были подключённые пиры или юнит
-//	   переписывал свой status.json (пир пришёл/ушёл).
-//	null  данных нет: панель не работала, только поднялась, либо источник
-//	   (systemd/журнал/status.json) недоступен.
+//	L  канал жив: systemd ответил и юнит не failed/inactive. Ноль трафика — это
+//	   числа слота (bytes=0, peers=0), а не отсутствие данных: простой канал
+//	   выглядит как L, а не как дыра.
+//	null  данных нет: ни systemd, ни status.json не прочитались — панель не
+//	   работала, только поднялась, или источник недоступен.
 //
 // Why this order: a dead unit is the most specific true statement about the
 // minute, and it also explains the other signals — a unit that dies may log
@@ -26,9 +29,9 @@ package admin
 // for the same reason: a unit that was stopped by hand is not "flapping" and is
 // not being rate-limited, it is simply off. U before P because a restart produces
 // both (the old link was refused, then the unit came back) and the restart is the
-// bigger event. L is the "nothing was wrong" answer, so it comes last among the
-// real signals. A missing state is not a signal at all, only the absence of one,
-// and it must stay distinct from "0 traffic": the ribbon draws them differently.
+// bigger event. L is what is left when the unit answered and nothing was wrong;
+// a missing state is not a signal at all, only the absence of one, and it must
+// stay distinct from "0 traffic": the ribbon draws them differently.
 //
 // The buffer holds at most 60 consecutive minutes, oldest first. It starts empty
 // and grows one slot per minute; a minute the panel missed while it was running
@@ -173,10 +176,17 @@ func (h *instanceHistory) record(id int, minute int64, slot historySlot) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	slots := h.byID[id]
-	if n := len(slots); n > 0 && minute <= slots[n-1].Minute {
-		slots[n-1] = slot
-		h.byID[id] = slots
-		return
+	if n := len(slots); n > 0 {
+		switch {
+		case minute == slots[n-1].Minute:
+			slots[n-1] = slot
+			h.byID[id] = slots
+			return
+		case minute < slots[n-1].Minute:
+			// A tick that arrived late with numbers for an older minute must not
+			// overwrite the newest slot: that slot already has the real minute.
+			return
+		}
 	}
 	if n := len(slots); n > 0 {
 		// Fill the minutes this process did not see, as "no data". Clamp to the
@@ -231,9 +241,25 @@ func (h *instanceHistory) snapshot(id int) ([]InstanceHistorySlot, int64, bool) 
 	return out, since, len(raw) == instanceHistorySlots
 }
 
+// lastSlot returns the newest slot already recorded for one instance, so the
+// recorder can decide whether the channel has been silent for two minutes.
+func (h *instanceHistory) lastSlot(id int) (historySlot, bool) {
+	if h == nil {
+		return historySlot{}, false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	slots := h.byID[id]
+	if len(slots) == 0 {
+		return historySlot{}, false
+	}
+	return slots[len(slots)-1], true
+}
+
 // save writes the ring atomically: another process (or the operator reading the
 // file) never sees a half-written document, the same tmp+rename the exit uses for
-// its status file.
+// its status file. A failure here is returned to the caller, never a panic: a
+// history that cannot be persisted must not take the panel down.
 func (h *instanceHistory) save() error {
 	if h == nil || h.path == "" {
 		return nil

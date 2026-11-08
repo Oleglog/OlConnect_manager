@@ -21,6 +21,7 @@ const (
 // historySignals is what the samples of one minute showed about one instance:
 // what systemd said and what the unit's status file said.
 type historySignals struct {
+	UnitKnown  bool // systemd answered at least once in the minute
 	Failed     bool // ActiveState=failed at some sample
 	Inactive   bool // ActiveState=inactive at some sample (a clean stop)
 	Restarted  bool // NRestarts grew or ActiveEnterTimestamp moved
@@ -35,6 +36,7 @@ type historySignals struct {
 // Peers do not accumulate — the slot reports the count at the end of the minute,
 // so the last sample wins.
 func (s *historySignals) merge(sample historySignals) {
+	s.UnitKnown = s.UnitKnown || sample.UnitKnown
 	s.Failed = s.Failed || sample.Failed
 	s.Inactive = s.Inactive || sample.Inactive
 	s.Restarted = s.Restarted || sample.Restarted
@@ -105,8 +107,8 @@ func classifyJournal(text string) journalMinute {
 
 // historyState collapses one minute of signals into one state letter, or "" when
 // there is nothing to say. The order is the priority rule documented on the ring
-// (D > I > U > P > L > no data): the first true statement wins, because it
-// explains the others.
+// (D > I > U > P > L, and no data only when nothing was readable): the first true
+// statement wins, because it explains the others.
 func historyState(sig historySignals, jm journalMinute) string {
 	switch {
 	case sig.Failed:
@@ -117,10 +119,31 @@ func historyState(sig historySignals, jm journalMinute) string {
 		return historyStateFlapping
 	case jm.Rejects > 0:
 		return historyStateLimited
-	case sig.PeersKnown && (sig.Peers > 0 || sig.Touched):
+	case sig.UnitKnown || sig.Touched || (sig.PeersKnown && sig.Peers > 0):
+		// The unit answered and is neither dead nor stopped, or its status file
+		// showed a peer: the channel is up. Zero traffic is a number in the slot,
+		// not the absence of data - a quiet but working channel is L, not a hole.
 		return historyStateAlive
 	}
 	return ""
+}
+
+// stalledMinute reports whether the minute that just ended is the second idle
+// minute in a row: the previous slot was L with clients and no traffic, and this
+// one is the same. One minute of silence is a pause; two with clients connected
+// mean the channel is up but not passing traffic, which is exactly "рвётся".
+// The previous slot is read back from the ring, so no extra state is kept.
+func stalledMinute(prev historySlot, minute int64, cur historySlot) bool {
+	if prev.Minute != minute-1 || prev.State != historyStateAlive {
+		return false
+	}
+	if !prev.BytesKnown || prev.Bytes != 0 || prev.Peers <= 0 {
+		return false
+	}
+	if !cur.BytesKnown || cur.Bytes != 0 || cur.Peers <= 0 {
+		return false
+	}
+	return cur.State == historyStateAlive
 }
 
 // historyUnitState is the part of `systemctl show` the ribbon needs. Active is
@@ -224,12 +247,16 @@ func (r *historyRecorder) sample(minute time.Time) {
 		state := r.unit(InstanceService(id))
 		sample := historySignals{}
 		if state.Known {
+			sample.UnitKnown = true
 			switch strings.ToLower(strings.TrimSpace(state.Active)) {
 			case "failed":
 				sample.Failed = true
 			case "inactive":
 				sample.Inactive = true
 			}
+			// The first observation of a unit is the baseline, never a restart:
+			// r.last starts empty, so a panel restart does not mark every live
+			// instance as flapping in its first minute.
 			if prev, ok := r.last[id]; ok && prev.Known {
 				if state.Restarts > prev.Restarts {
 					sample.Restarted = true
@@ -279,14 +306,20 @@ func (r *historyRecorder) finalize() {
 		} else {
 			logger.Debugf("instance history: journal for %s: %v", InstanceService(id), err)
 		}
-		r.history.record(id, minuteIndex, historySlot{
+		slot := historySlot{
 			State:      historyState(sig, jm),
 			Bytes:      jm.Bytes,
 			BytesKnown: jm.Known,
 			Peers:      sig.Peers,
 			Restarts:   sig.Restarts,
 			Rejects:    jm.Rejects,
-		})
+		}
+		if prev, ok := r.history.lastSlot(id); ok && stalledMinute(prev, minuteIndex, slot) {
+			// Clients connected two minutes running with no traffic at all: the
+			// channel is up but not moving, which is "рвётся", not "жив".
+			slot.State = historyStateFlapping
+		}
+		r.history.record(id, minuteIndex, slot)
 	}
 	if err := r.history.save(); err != nil {
 		logger.Errorf("instance history: write %s: %v", r.history.path, err)

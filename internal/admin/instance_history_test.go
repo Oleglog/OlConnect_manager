@@ -112,9 +112,10 @@ func TestInstanceHistoryReplacesTheSameMinute(t *testing.T) {
 }
 
 // The priority rule, in one table: the first true statement about the minute
-// wins, because it explains the rest.
+// wins, because it explains the rest. "No data" is only for a minute in which
+// nothing at all could be read - a quiet but running unit is alive.
 func TestHistoryStatePriority(t *testing.T) {
-	alive := historySignals{Peers: 2, PeersKnown: true}
+	alive := historySignals{UnitKnown: true, Peers: 2, PeersKnown: true}
 	cases := []struct {
 		name string
 		sig  historySignals
@@ -123,19 +124,72 @@ func TestHistoryStatePriority(t *testing.T) {
 	}{
 		{"dead beats everything", historySignals{Failed: true, Inactive: true, Restarted: true, Peers: 2, PeersKnown: true},
 			journalMinute{Known: true, Rejects: 9, Reconnects: 9}, historyStateDead},
-		{"stopped beats flapping", historySignals{Inactive: true, Restarted: true}, journalMinute{Known: true, Rejects: 1}, historyStateStopped},
-		{"restart beats refusals", historySignals{Restarted: true}, journalMinute{Known: true, Rejects: 4}, historyStateFlapping},
-		{"reconnect beats refusals", historySignals{}, journalMinute{Known: true, Rejects: 4, Reconnects: 1}, historyStateFlapping},
+		{"stopped beats flapping", historySignals{UnitKnown: true, Inactive: true, Restarted: true},
+			journalMinute{Known: true, Rejects: 1}, historyStateStopped},
+		{"restart beats refusals", historySignals{UnitKnown: true, Restarted: true},
+			journalMinute{Known: true, Rejects: 4}, historyStateFlapping},
+		{"reconnect beats refusals", historySignals{UnitKnown: true},
+			journalMinute{Known: true, Rejects: 4, Reconnects: 1}, historyStateFlapping},
 		{"refusals beat alive", alive, journalMinute{Known: true, Rejects: 1}, historyStateLimited},
 		{"alive with peers", alive, journalMinute{Known: true}, historyStateAlive},
 		{"alive on a peer change", historySignals{Touched: true}, journalMinute{Known: true}, historyStateAlive},
-		{"active with no traffic is not alive", historySignals{PeersKnown: true}, journalMinute{Known: true}, ""},
+		{"a running unit with no traffic is alive, not a hole", historySignals{UnitKnown: true},
+			journalMinute{Known: true}, historyStateAlive},
+		{"a status file alone with zero peers says nothing", historySignals{PeersKnown: true},
+			journalMinute{Known: true}, ""},
 		{"nothing known at all", historySignals{}, journalMinute{}, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := historyState(c.sig, c.jm); got != c.want {
 				t.Fatalf("historyState(%+v, %+v) = %q, want %q", c.sig, c.jm, got, c.want)
+			}
+		})
+	}
+}
+
+// Two minutes of "clients connected, no traffic at all" are a stalled channel:
+// the second minute is U. One such minute is still a pause, and an unknown byte
+// counter cannot prove silence.
+func TestStalledMinute(t *testing.T) {
+	live := func(peers int) historySlot {
+		return historySlot{Minute: 100, State: historyStateAlive, Peers: peers, Bytes: 0, BytesKnown: true}
+	}
+	cases := []struct {
+		name string
+		prev historySlot
+		cur  historySlot
+		want bool
+	}{
+		{"second idle minute with clients", live(1), live(1), true},
+		{"previous minute had traffic", func() historySlot {
+			s := live(1)
+			s.Bytes = 500
+			return s
+		}(), live(1), false},
+		{"previous minute had no clients", live(0), live(1), false},
+		{"this minute has no clients", live(1), live(0), false},
+		{"traffic unknown cannot prove silence", func() historySlot {
+			s := live(1)
+			s.BytesKnown = false
+			return s
+		}(), live(1), false},
+		{"previous minute is not adjacent", func() historySlot {
+			s := live(1)
+			s.Minute = 95
+			return s
+		}(), live(1), false},
+		{"previous minute was not alive", func() historySlot {
+			s := live(1)
+			s.State = historyStateLimited
+			return s
+		}(), live(1), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := stalledMinute(c.prev, 100, c.cur)
+			if got != c.want {
+				t.Fatalf("stalledMinute(%+v, 100, %+v) = %v, want %v", c.prev, c.cur, got, c.want)
 			}
 		})
 	}
@@ -202,6 +256,40 @@ func TestInstanceHistoryJSONShape(t *testing.T) {
 	}
 }
 
+// A tick that arrives late with numbers for a minute already closed must not
+// overwrite the newest slot: that slot belongs to the minute after it.
+func TestInstanceHistoryLateMinuteDoesNotOverwriteTheNewest(t *testing.T) {
+	h := newInstanceHistory("")
+	newer := time.Date(2026, 11, 8, 10, 5, 0, 0, time.UTC)
+	h.record(0, minuteAt(newer), historySlot{State: historyStateAlive, Peers: 2})
+	h.record(0, minuteAt(newer.Add(-time.Minute)), historySlot{State: historyStateDead, Peers: 9})
+
+	slots, _, _ := h.snapshot(0)
+	if len(slots) != 1 {
+		t.Fatalf("slots = %d, want 1: a stale minute is not a new slot", len(slots))
+	}
+	if slots[0].State == nil || *slots[0].State != historyStateAlive || slots[0].Peers != 2 {
+		t.Fatalf("slot = %+v, want the newer recording untouched", slots[0])
+	}
+}
+
+// A data dir the panel cannot write must produce an error, never a panic: the
+// history is a nicety, not a reason to fall over.
+func TestInstanceHistorySaveFailureIsReturnedNotFatal(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile() = %v", err)
+	}
+	// Its parent "directory" is a file, so creating the data dir must fail on
+	// every platform - the same shape as an unwritable /var/lib/olcrtc.
+	h := newInstanceHistory(filepath.Join(blocker, instanceHistoryFile))
+	h.record(0, minuteAt(time.Now()), historySlot{State: historyStateAlive})
+	if err := h.save(); err == nil {
+		t.Fatal("save() = nil, want an error for a data dir that cannot be created")
+	}
+}
+
 // The hour has to survive a panel restart: the file is written atomically and a
 // slot older than the window is not shown as if it were the newest one.
 func TestInstanceHistorySurvivesRestart(t *testing.T) {
@@ -248,6 +336,46 @@ func TestInstanceHistorySurvivesRestart(t *testing.T) {
 	slots, _, _ := pruned.snapshot(1)
 	if len(slots) != 1 || slots[0].State == nil || *slots[0].State != historyStateDead {
 		t.Fatalf("pruned ring = %+v, want only the fresh slot", slots)
+	}
+}
+
+// A channel with clients that stops carrying traffic is "рвётся" from the second
+// silent minute: the first quiet minute is still a pause (L), the next one is U.
+func TestHistoryRecorderMarksTheSecondIdleMinuteAsFlapping(t *testing.T) {
+	history := newInstanceHistory("")
+	now := time.Date(2026, 11, 8, 10, 0, 5, 0, time.UTC)
+	recorder := &historyRecorder{
+		history: history,
+		ids:     func() []int { return []int{0} },
+		unit: func(string) historyUnitState {
+			return historyUnitState{Active: "active", EnterAt: 1_700_000_000, Known: true}
+		},
+		peers:   func(int, bool) (int, time.Time, bool) { return 1, now, true },
+		journal: func(string, time.Time, time.Time) (string, error) { return "", nil },
+		now:     func() time.Time { return now },
+		sig:     map[int]*historySignals{},
+		last:    map[int]historyUnitState{},
+	}
+
+	recorder.tick(now) // 10:00:05
+	now = time.Date(2026, 11, 8, 10, 1, 5, 0, time.UTC)
+	recorder.tick(now) // finalises 10:00
+	slots, _, _ := history.snapshot(0)
+	if len(slots) != 1 || slots[0].State == nil || *slots[0].State != historyStateAlive {
+		t.Fatalf("first quiet minute = %+v, want L: one silent minute is a pause", slots)
+	}
+
+	now = time.Date(2026, 11, 8, 10, 2, 5, 0, time.UTC)
+	recorder.tick(now) // finalises 10:01
+	slots, _, _ = history.snapshot(0)
+	if len(slots) != 2 {
+		t.Fatalf("slots = %d, want 2", len(slots))
+	}
+	if slots[1].State == nil || *slots[1].State != historyStateFlapping {
+		t.Fatalf("second quiet minute = %+v, want U (clients present, no traffic)", slots[1])
+	}
+	if slots[1].Peers != 1 {
+		t.Fatalf("peers = %d, want the client count kept in the slot", slots[1].Peers)
 	}
 }
 
