@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -754,6 +755,30 @@ func isOpenFluxAutoRoomTransport(transport string) bool {
 	}
 }
 
+// openfluxRoomCheckInterval throttles the journal scan buildInstance does for
+// cups instances: the exit publishes a new list when it replaces a room the
+// relay closed, and the phone has to hear about it, but the UI polls this path
+// far more often than a room can change.
+const openfluxRoomCheckInterval = 20 * time.Second
+
+var (
+	openfluxRoomCheckMu   sync.Mutex
+	openfluxRoomCheckedAt = map[int]time.Time{}
+)
+
+// openfluxRoomCheckDue reports whether instance id may be scanned now, and
+// records the scan so the next callers within the interval skip it.
+func openfluxRoomCheckDue(id int) bool {
+	openfluxRoomCheckMu.Lock()
+	defer openfluxRoomCheckMu.Unlock()
+	now := time.Now()
+	if at, ok := openfluxRoomCheckedAt[id]; ok && now.Sub(at) < openfluxRoomCheckInterval {
+		return false
+	}
+	openfluxRoomCheckedAt[id] = now
+	return true
+}
+
 func formatOpenFluxRoomURL(transport, raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -931,6 +956,22 @@ func (s *Server) buildInstance(id int) Instance {
 		} else if formatted := formatOpenFluxRoomURL(transport, curRoom); formatted != curRoom {
 			vals["OLCRTC_ROOM_ID"] = formatted
 			_ = SetEnvValue(envPath, "OLCRTC_ROOM_ID", formatted)
+		}
+		// The exit swaps a room the relay closed for a fresh one itself and
+		// publishes the new list ("[INFO] Active room URL"). Until that list
+		// reaches the phone's profile, the phone keeps sending into rooms
+		// nobody is in and its traffic dies without a single error. Adopt the
+		// published list and push it to the subscription, throttled: the check
+		// shells out to journalctl and the UI polls this path often.
+		if openfluxRoomCheckDue(id) {
+			if detected := extractOpenFluxRoomFromJournal(InstanceService(id), transport); detected != "" && detected != strings.TrimSpace(vals["OLCRTC_ROOM_ID"]) {
+				vals["OLCRTC_ROOM_ID"] = detected
+				_ = SetEnvValue(envPath, "OLCRTC_ROOM_ID", detected)
+				if uri := s.buildURIWith(vals, clientID); uri != "" {
+					_ = s.refreshLinkedSubscriptionInstance(id, uri)
+				}
+				logger.Infof("openflux %s: exit published a new room list on instance %d, subscription refreshed", transport, id)
+			}
 		}
 	}
 	authToken := strings.TrimSpace(vals["OLCRTC_AUTH_TOKEN"])
