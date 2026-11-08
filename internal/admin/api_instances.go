@@ -718,6 +718,33 @@ func (s *Server) rotateRoom(w http.ResponseWriter, id int) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// isBoardsRoom reports whether the instance runs on a Yandex Board, either
+// because the transport says so or because the room link is a board link (the
+// Admin UI stores "auto" when its transport select is left alone).
+func isBoardsRoom(transport, room string) bool {
+	switch strings.ToLower(strings.TrimSpace(transport)) {
+	case "boards", "board":
+		return true
+	}
+	return strings.Contains(room, "boards.yandex.ru")
+}
+
+// openFluxShareKey resolves the encryption key the exit will actually run with,
+// so a share link never hands a phone a profile the exit cannot talk to. The
+// launcher takes OLCRTC_OPENFLUX_KEY, then OPENFLUX_KEY, and for boards only
+// falls back to OLCRTC_KEY - the field the Admin UI writes.
+func openFluxShareKey(vals map[string]string, transport, room string) string {
+	for _, name := range []string{"OLCRTC_OPENFLUX_KEY", "OPENFLUX_KEY"} {
+		if v := strings.TrimSpace(vals[name]); v != "" {
+			return v
+		}
+	}
+	if isBoardsRoom(transport, room) {
+		return strings.TrimSpace(vals["OLCRTC_KEY"])
+	}
+	return ""
+}
+
 func isOpenFluxAutoRoomTransport(transport string) bool {
 	switch strings.ToLower(strings.TrimSpace(transport)) {
 	case "cups", "cupsonline", "avito":
@@ -1007,6 +1034,8 @@ func (s *Server) buildCompactURIWith(vals map[string]string, clientID string) st
 				name = "OpenFlux Bitrix24"
 			} else if transport == "vyandex" {
 				name = "OpenFlux Volga"
+			} else if isBoardsRoom(transport, room) {
+				name = "OpenFlux Boards"
 			} else {
 				name = "OpenFlux Yandex"
 			}
@@ -1029,6 +1058,8 @@ func (s *Server) buildCompactURIWith(vals map[string]string, clientID string) st
 			host = "bitrix24"
 		} else if transport == "vyandex" {
 			host = "vyandex"
+		} else if isBoardsRoom(transport, room) {
+			host = "boards"
 		}
 		uri := fmt.Sprintf("openflux://%s?url=%s", host, url.QueryEscape(room))
 		if transport != "" && transport != "auto" {
@@ -1037,7 +1068,7 @@ func (s *Server) buildCompactURIWith(vals map[string]string, clientID string) st
 		if dns := strings.TrimSpace(vals["OLCRTC_DNS"]); dns != "" && dns != "77.88.8.8:53" {
 			uri += "&d=" + url.QueryEscape(dns)
 		}
-		if encKey := strings.TrimSpace(vals["OLCRTC_OPENFLUX_KEY"]); encKey != "" {
+		if encKey := openFluxShareKey(vals, transport, room); encKey != "" {
 			uri += "&k=" + url.QueryEscape(encKey)
 		}
 		codec := strings.TrimSpace(vals["OLCRTC_OPENFLUX_CODEC"])
@@ -1102,6 +1133,8 @@ func (s *Server) buildURIWith(vals map[string]string, clientID string) string {
 				name = "OpenFlux Bitrix24"
 			} else if transport == "vyandex" {
 				name = "OpenFlux Volga"
+			} else if isBoardsRoom(transport, room) {
+				name = "OpenFlux Boards"
 			} else {
 				name = "OpenFlux Yandex"
 			}
@@ -1124,6 +1157,8 @@ func (s *Server) buildURIWith(vals map[string]string, clientID string) string {
 			host = "bitrix24"
 		} else if transport == "vyandex" {
 			host = "vyandex"
+		} else if isBoardsRoom(transport, room) {
+			host = "boards"
 		}
 		uri := fmt.Sprintf("openflux://%s?url=%s", host, url.QueryEscape(room))
 		if transport != "" && transport != "auto" {
@@ -1132,7 +1167,7 @@ func (s *Server) buildURIWith(vals map[string]string, clientID string) string {
 		if dns := strings.TrimSpace(vals["OLCRTC_DNS"]); dns != "" && dns != "77.88.8.8:53" {
 			uri += "&d=" + url.QueryEscape(dns)
 		}
-		if encKey := strings.TrimSpace(vals["OLCRTC_OPENFLUX_KEY"]); encKey != "" {
+		if encKey := openFluxShareKey(vals, transport, room); encKey != "" {
 			uri += "&k=" + url.QueryEscape(encKey)
 		}
 		codec := strings.TrimSpace(vals["OLCRTC_OPENFLUX_CODEC"])

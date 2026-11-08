@@ -144,6 +144,8 @@ if [ "$carrier" = "openflux" ]; then
             t="telemost"
         elif [[ "${OLCRTC_ROOM_ID}" == *"bitrix24"* ]]; then
             t="bitrix24"
+        elif [[ "${OLCRTC_ROOM_ID}" == *"boards.yandex.ru"* ]]; then
+            t="boards"
         elif [[ "${OLCRTC_ROOM_ID}" == *"/edit/d/"* ]]; then
             t="vyandex"
         else
@@ -162,6 +164,15 @@ if [ "$carrier" = "openflux" ]; then
     codec="${OLCRTC_OPENFLUX_CODEC:-${OLCRTC_CODEC:-batched}}"
     codec_flag="--codec $codec"
     key_flag=""
+    # Boards is the one carrier the board only lets through sealed: it refuses
+    # objects whose payload is a visible IP packet (securityCode
+    # NETWORK_TRANSPORT), so a keyless boards exit is a silent dead end. The
+    # Admin UI keeps the key in OLCRTC_KEY, so fall back to it for boards only -
+    # keying every carrier would break the keyless Mail.ru/Cups profiles phones
+    # already carry.
+    if [ "$t" = "boards" ] && [ -z "${OLCRTC_OPENFLUX_KEY:-${OPENFLUX_KEY:-}}" ] && [ -n "${OLCRTC_KEY:-}" ]; then
+        OLCRTC_OPENFLUX_KEY="$OLCRTC_KEY"
+    fi
     if [ -n "${OLCRTC_OPENFLUX_KEY:-${OPENFLUX_KEY:-}}" ]; then
         key_flag="--encryption-key ${OLCRTC_OPENFLUX_KEY:-${OPENFLUX_KEY}}"
     fi

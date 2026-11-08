@@ -15,6 +15,7 @@ func TestCarrierTransportCompatibilityMatrix(t *testing.T) {
 		{"openflux", "cupsonline"},
 		{"openflux", "telemost"},
 		{"openflux", "bitrix24"},
+		{"openflux", "boards"},
 		{"openflux", "auto"},
 	}
 	for _, combo := range compatible {
@@ -56,7 +57,7 @@ func TestCompatibleTransports(t *testing.T) {
 	if got := compatibleTransports("jitsi"); len(got) != 1 || got[0] != "datachannel" {
 		t.Fatalf("jitsi transports = %v", got)
 	}
-	if got := compatibleTransports("openflux"); len(got) != 8 || got[3] != "mailru" {
+	if got := compatibleTransports("openflux"); len(got) != 9 || got[1] != "boards" || got[4] != "mailru" {
 		t.Fatalf("openflux transports = %v", got)
 	}
 }
