@@ -152,38 +152,35 @@ func TestHistoryStatePriority(t *testing.T) {
 // the second minute is U. One such minute is still a pause, and an unknown byte
 // counter cannot prove silence.
 func TestStalledMinute(t *testing.T) {
-	live := func(peers int) historySlot {
-		return historySlot{Minute: 100, State: historyStateAlive, Peers: peers, Bytes: 0, BytesKnown: true}
+	live := func(minute int64, peers int) historySlot {
+		return historySlot{Minute: minute, State: historyStateAlive, Peers: peers, Bytes: 0, BytesKnown: true}
 	}
+	prev, cur := live(99, 1), live(100, 1)
 	cases := []struct {
 		name string
 		prev historySlot
 		cur  historySlot
 		want bool
 	}{
-		{"second idle minute with clients", live(1), live(1), true},
+		{"second idle minute with clients", prev, cur, true},
 		{"previous minute had traffic", func() historySlot {
-			s := live(1)
+			s := prev
 			s.Bytes = 500
 			return s
-		}(), live(1), false},
-		{"previous minute had no clients", live(0), live(1), false},
-		{"this minute has no clients", live(1), live(0), false},
+		}(), cur, false},
+		{"previous minute had no clients", live(99, 0), cur, false},
+		{"this minute has no clients", prev, live(100, 0), false},
 		{"traffic unknown cannot prove silence", func() historySlot {
-			s := live(1)
+			s := prev
 			s.BytesKnown = false
 			return s
-		}(), live(1), false},
-		{"previous minute is not adjacent", func() historySlot {
-			s := live(1)
-			s.Minute = 95
-			return s
-		}(), live(1), false},
+		}(), cur, false},
+		{"previous minute is not adjacent", live(95, 1), cur, false},
 		{"previous minute was not alive", func() historySlot {
-			s := live(1)
+			s := prev
 			s.State = historyStateLimited
 			return s
-		}(), live(1), false},
+		}(), cur, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
