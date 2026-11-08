@@ -528,57 +528,44 @@ function makePrimaryButton(label, onClick) {
 }
 
 function renderSystemBlock(sys) {
-  const container = el('div', 'sys');
+  // Same vocabulary as every other screen: one panel, its facts in facts/fact-k/
+  // fact-v. No second stylesheet, no icon slab, no badge.
+  const panel = el('section', 'panel');
 
-  // The banner is one line of identity plus the one number a person opens this
-  // screen for: uptime. The lavender icon slab and the "онлайн" pill are gone;
-  // the state is a word with the same vocabulary the channels use.
-  const banner = el('section', 'sys-banner');
-  const identity = el('div', 'sys-id');
-  const titleLine = el('div', 'sys-title');
-  titleLine.appendChild(el('h2', 'sys-name', 'Сервер olcRTC'));
-  titleLine.appendChild(el('span', 'sys-state is-live', 'онлайн'));
-  identity.appendChild(titleLine);
-  const verLine = el('div', 'sys-line');
-  verLine.appendChild(document.createTextNode('Версия '));
-  verLine.appendChild(el('span', 'is-mono', sys.version || '-'));
-  verLine.appendChild(document.createTextNode(', ОС: ' + (sys.os || '-')));
-  identity.appendChild(verLine);
-  banner.appendChild(identity);
-
-  const uptime = el('div', 'sys-uptime');
-  uptime.appendChild(el('div', 'sys-k', 'Аптайм'));
-  uptime.appendChild(el('div', 'sys-v', sys.uptime || '-'));
-  banner.appendChild(uptime);
-  container.appendChild(banner);
+  const head = el('div', 'panel-head');
+  head.appendChild(el('h2', '', 'Сервер olcRTC'));
+  const hintBits = ['онлайн'];
+  if (sys.version) hintBits.push('версия ' + sys.version);
+  if (sys.os) hintBits.push(sys.os);
+  head.appendChild(el('span', 'hint', hintBits.join(', ')));
+  panel.appendChild(head);
 
   const items = [
-    { label: 'Активные пиры', val: String(Number(sys.active_peers) || 0), id: 'active-peer-count', highlight: true },
+    { label: 'Аптайм', val: sys.uptime || '-', mono: true },
+    { label: 'Активные пиры', val: String(Number(sys.active_peers) || 0), id: 'active-peer-count', mono: true },
     { label: 'Инстансы', val: (sys.instances_running || 0) + ' / ' + (sys.instances_total || 0) },
-    { label: 'Публичный IP', val: sys.public_ip || '-', copy: true },
+    { label: 'Публичный IP', val: sys.public_ip || '-', copy: true, mono: true },
     { label: 'TLS / Домен', val: (sys.tls_mode || '-') + (sys.domain ? ' (' + sys.domain + ')' : '') },
-    { label: 'Порт админки', val: sys.admin_port || '-' },
+    { label: 'Порт админки', val: sys.admin_port || '-', mono: true },
     { label: 'Подписки', val: sys.sub_enabled ? (sys.sub_running ? 'Включены' : 'Сбой') : 'Выключены' },
   ];
 
-  // Facts, not six cards: one framed grid whose values line up, so the numbers
-  // can be compared down the column instead of being found inside boxes.
-  const facts = el('section', 'sys-facts');
+  const facts = el('div', 'facts');
   items.forEach(it => {
-    const fact = el('div', 'sys-fact');
-    fact.appendChild(el('div', 'sys-k', it.label));
-    const val = el('div', 'sys-v' + (it.highlight ? ' is-lead' : '') + (it.copy ? ' copyable' : ''));
+    const cell = el('div', '');
+    cell.appendChild(el('div', 'fact-k', it.label));
+    const cls = 'fact-v' + (it.mono ? ' num' : '') + (it.copy ? ' copyable' : '');
+    const val = el('div', cls);
     if (it.id) val.id = it.id;
     val.textContent = it.val;
-    fact.appendChild(val);
-    facts.appendChild(fact);
+    cell.appendChild(val);
+    facts.appendChild(cell);
   });
-  container.appendChild(facts);
-  return container;
+  panel.appendChild(facts);
+
+  return panel;
 }
 
-// .head of the instances screen, from the mockup: «9 инстансов: 6 активны,
-// 3 остановлены. По каналу: 1 рвётся, 1 на пределе» and the one primary action.
 function renderInstancesHead(instances, memberships) {
   const total = instances.length;
   const running = instances.filter(i => i.status === 'running' || i.status === 'active').length;
@@ -978,6 +965,16 @@ function setUsageBadge(node, usage) {
   }
 }
 
+// Volume for the metric cell, in the mockup's units: one decimal, comma
+// separator, and no unit switch that would make two rows incomparable.
+function fmtByteVolume(bytes) {
+  if (!bytes) return '0 КБ';
+  const kb = bytes / 1024;
+  if (kb < 1024) return kb.toFixed(kb < 10 ? 1 : 0).replace('.', ',') + ' КБ';
+  const mb = kb / 1024;
+  return mb.toFixed(mb < 10 ? 1 : 0).replace('.', ',') + ' МБ';
+}
+
 function peersWord(count) {
   const mod10 = count % 10;
   const mod100 = count % 100;
@@ -1039,7 +1036,21 @@ function renderInstanceCard(inst, context = {}) {
   }
   row.appendChild(chan);
 
+  // Mockup metric cell: "<b class=num>3,1</b> МБ / <b class=num>1</b> клиент",
+  // then uptime under a break. The hour's volume is the sum of the ring's
+  // per-minute bytes; when no slot carries a number the cell says so instead of
+  // showing a zero.
   const metric = el('div', 'row-metric');
+  const hourBytes = agg.history.reduce((sum, slot) => {
+    return sum + (slot && typeof slot.bytes === 'number' ? slot.bytes : 0);
+  }, 0);
+  const bytesKnown = agg.history.some(slot => slot && typeof slot.bytes === 'number');
+  if (bytesKnown) {
+    metric.appendChild(el('b', 'num', fmtByteVolume(hourBytes)));
+  } else {
+    metric.appendChild(el('span', 'nok', 'нет данных'));
+  }
+  metric.appendChild(document.createTextNode(' / '));
   const peersNode = el('b', 'num');
   peersNode.dataset.instanceUsage = String(inst.id);
   setUsageBadge(peersNode, inst);
@@ -1134,12 +1145,24 @@ function renderInstanceCard(inst, context = {}) {
       } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
     });
   };
-  actions.appendChild(uriBtn);
-  actions.appendChild(qrBtn);
-  actions.appendChild(pingBtn);
+  // The mockup's row carries two controls, and seven buttons made the row noisy
+  // next to a two-line channel cell. Settings and power stay visible; copy, QR,
+  // ping, restart and delete sit behind one disclosure. It is plain
+  // details/summary, so no JS state, and every handler, confirm included, is the
+  // same object it was before.
   actions.appendChild(cfgBtn);
   actions.appendChild(startStopBtn);
-  actions.appendChild(restartBtn);
+  const menu = el('details', 'row-menu');
+  const menuBtn = el('summary', 'btn btn-ghost btn-sm btn-icon');
+  menuBtn.setAttribute('aria-label', 'Остальные действия');
+  menuBtn.title = 'Остальные действия';
+  menuBtn.innerHTML = icon('chevron-down');
+  menu.appendChild(menuBtn);
+  const menuBody = el('div', '');
+  menuBody.appendChild(uriBtn);
+  menuBody.appendChild(qrBtn);
+  menuBody.appendChild(pingBtn);
+  menuBody.appendChild(restartBtn);
   if (inst.id !== 0) {
     const delBtn = el('button', 'btn btn-danger btn-sm btn-icon');
     delBtn.setAttribute('aria-label', 'Удалить инстанс');
@@ -1164,8 +1187,10 @@ function renderInstanceCard(inst, context = {}) {
         render();
       } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
     };
-    actions.appendChild(delBtn);
+    menuBody.appendChild(delBtn);
   }
+  menu.appendChild(menuBody);
+  actions.appendChild(menu);
   row.appendChild(actions);
   return row;
 }

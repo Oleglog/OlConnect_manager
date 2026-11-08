@@ -152,6 +152,33 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .row-metric b { color: var(--ink); font-weight: 600; }
 .row-metric .nok { color: var(--ink-faint); }
 .row-actions { display: flex; gap: var(--s-1); justify-content: flex-end; }
+/* The mockup's row carries two controls; the secondary actions live behind one
+   disclosure rather than five more buttons. Plain details/summary: no JS state,
+   and the handlers inside are the same objects. */
+.row-menu { position: relative; }
+.row-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease);
+}
+.row-menu > summary::-webkit-details-marker { display: none; }
+.row-menu[open] > summary { background: var(--surface-hover); }
+.row-menu > div {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--s-1));
+  z-index: 20;
+  min-width: 176px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s-1);
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  box-shadow: var(--shadow-overlay);
+}
+.row-menu > div .btn { width: 100%; justify-content: flex-start; }
 
 /* Facts and disclosures -------------------------------------------------- */
 .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--s-4); padding: var(--s-4); }
