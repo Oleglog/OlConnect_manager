@@ -85,7 +85,7 @@ function setTheme() {
 function compatibleTransports(carrier) {
   if (carrier === 'telemost' || carrier === 'wbstream') return ['vp8channel'];
   if (carrier === 'jitsi') return ['datachannel'];
-  if (carrier === 'openflux') return ['auto', 'vyandex', 'yandex', 'mailru', 'avito', 'cups', 'telemost', 'bitrix24'];
+  if (carrier === 'openflux') return ['auto', 'boards', 'vyandex', 'yandex', 'mailru', 'avito', 'cups', 'telemost', 'bitrix24'];
   return ['vp8channel', 'datachannel'];
 }
 
@@ -217,6 +217,9 @@ function fmtTransportInfo(inst) {
       return { label: '🏢 Битрикс24', hint: 'Портал: ' + (room || '—') + '. Нужны куки портала + sessid + chat ID.' };
     case 'avito':
       return { label: '🟢 Авито (code.avito.ru)', hint: 'Звонок создаётся сам: залогиньтесь на code.avito.ru, скопируйте куки в поле «Куки» профиля — POST /web/1/code/room выполнит транспорт.' };
+    case 'boards':
+    case 'board':
+      return { label: '🧩 Яндекс Доски', hint: 'Доска: ' + (room || '—') + '. Ключ шифрования обязателен: доска отбрасывает кадры, внутри которых виден IP-пакет. Клиенту нужна ссылка openflux:// с k=.' };
     case 'auto':
       return { label: '✨ Авто', hint: 'Транспорт определится по ссылке документа.' };
     default:
@@ -808,6 +811,7 @@ function uriProvider(rawURI) {
       if (t === 'telemost' || host === 'telemost' || docUrl.includes('telemost.yandex.ru')) return 'openflux_telemost';
       if (t === 'bitrix24' || t === 'bitrix' || host === 'bitrix24' || host === 'bitrix' || docUrl.includes('bitrix24')) return 'openflux_bitrix24';
       if (t === 'vyandex' || t === 'volga' || host === 'vyandex' || docUrl.includes('/edit/d/')) return 'openflux_volga';
+      if (t === 'boards' || t === 'board' || host === 'boards' || docUrl.includes('boards.yandex.ru')) return 'openflux_boards';
       if (t === 'yandex' || host === 'yandex' || docUrl.includes('yandex.')) return 'openflux_yandex';
       return 'openflux';
     }
@@ -2639,6 +2643,8 @@ function showCreateInstanceModal() {
         nameField.input.value = 'OpenFlux Telemost';
       } else if (finalTransport === 'bitrix24' || finalTransport === 'bitrix' || room.includes('bitrix24')) {
         nameField.input.value = 'OpenFlux Bitrix24';
+      } else if (finalTransport === 'boards' || finalTransport === 'board' || room.includes('boards.yandex.ru')) {
+        nameField.input.value = 'OpenFlux Boards';
       } else if (finalTransport === 'vyandex' || room.includes('/edit/d/')) {
         nameField.input.value = 'OpenFlux Volga';
       } else {
@@ -3027,6 +3033,8 @@ function showConfigModal(inst) {
         nameField.input.value = 'OpenFlux Telemost';
       } else if (t === 'bitrix24' || t === 'bitrix' || room.includes('bitrix24')) {
         nameField.input.value = 'OpenFlux Bitrix24';
+      } else if (t === 'boards' || t === 'board' || room.includes('boards.yandex.ru')) {
+        nameField.input.value = 'OpenFlux Boards';
       } else if (t === 'vyandex' || room.includes('/edit/d/')) {
         nameField.input.value = 'OpenFlux Volga';
       } else {
@@ -3056,6 +3064,8 @@ function showConfigModal(inst) {
         nameField.input.value = 'OpenFlux Telemost';
       } else if (t === 'bitrix24' || t === 'bitrix' || room.includes('bitrix24')) {
         nameField.input.value = 'OpenFlux Bitrix24';
+      } else if (t === 'boards' || t === 'board' || room.includes('boards.yandex.ru')) {
+        nameField.input.value = 'OpenFlux Boards';
       } else if (t === 'vyandex' || room.includes('/edit/d/')) {
         nameField.input.value = 'OpenFlux Volga';
       } else {
