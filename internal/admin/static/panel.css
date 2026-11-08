@@ -1,0 +1,186 @@
+/* Instances section, "Рейка" design. Scoped to .vl-* so it does not touch the
+   screens that still run on Tailwind and style.css; those migrate in the next
+   steps, and only then does base.css get linked. Colours come from tokens.css,
+   numbers from JetBrains Mono, text from Manrope (Panels' current face has no
+   Cyrillic subset, so Russian text used to fall back to the system font). */
+
+.vl-section {
+  font-family: var(--font-ui);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+/* One panel per group: the group frame (its numbering and hue) comes from
+   style.css, and the rows inside it are separated by hairlines only, so the list
+   never becomes a card inside a card. */
+.vl-rows {
+  margin-top: var(--s-2);
+}
+
+.vl-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1.4fr) 190px auto;
+  align-items: start;
+  gap: var(--s-4);
+  padding: var(--s-3) 0;
+  border-top: 1px solid var(--line);
+  transition: background-color var(--dur) var(--ease);
+}
+.vl-row:first-child { border-top: 0; }
+.vl-row:hover { background: var(--surface-raised); }
+
+.vl-id { min-width: 0; }
+.vl-name {
+  font-size: var(--fs-14);
+  font-weight: 700;
+  color: var(--ink);
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+.vl-sub {
+  font-size: var(--fs-12);
+  color: var(--ink-faint);
+  margin-top: 2px;
+  overflow-wrap: break-word;
+}
+
+/* The channel cell: the state word above its hour, both from the same history,
+   so the word is for reading and the rail is for scanning. */
+.vl-chan { display: flex; flex-direction: column; gap: var(--s-1); min-width: 0; }
+.vl-state {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--ink);
+}
+.vl-state::before {
+  content: "";
+  align-self: center;
+  width: 2px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--vl-state-colour, var(--st-idle));
+  flex: none;
+}
+.vl-state .vl-why { font-weight: 500; color: var(--ink-faint); font-size: var(--fs-12); }
+.vl-state.is-live { --vl-state-colour: var(--st-live); }
+.vl-state.is-flapping { --vl-state-colour: var(--st-degraded); }
+.vl-state.is-limited { --vl-state-colour: var(--st-warn); }
+.vl-state.is-dead { --vl-state-colour: var(--st-down); }
+.vl-state.is-idle { --vl-state-colour: var(--st-idle); }
+
+.vl-rail {
+  display: flex;
+  gap: 1px;
+  height: 10px;
+  margin-top: 2px;
+  border-radius: 1px;
+  overflow: clip;
+}
+.vl-run { flex-basis: 0; min-width: 2px; }
+.vl-run.is-live { background: var(--st-live); }
+.vl-run.is-flapping { background: var(--st-degraded); }
+.vl-run.is-limited { background: var(--st-warn); }
+.vl-run.is-dead { background: var(--st-down); }
+.vl-run.is-idle { background: var(--st-idle); }
+.vl-run.is-gap {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--line-strong) 0 2px,
+    transparent 2px 5px
+  );
+  border: 1px solid var(--line-strong);
+}
+.vl-rail-empty {
+  margin-top: 2px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-1);
+  color: var(--ink-faint);
+  font-size: var(--fs-11);
+  padding: 1px var(--s-2);
+  align-self: flex-start;
+}
+.vl-rail-cap {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-2);
+  color: var(--ink-faint);
+  font-size: var(--fs-11);
+}
+.vl-rail-cap .vl-partial { color: var(--ink-muted); }
+
+.vl-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  font-size: var(--fs-12);
+  color: var(--ink-muted);
+  min-width: 0;
+}
+.vl-metric-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1); }
+.vl-uptime { font-family: var(--font-num); color: var(--ink-faint); font-size: var(--fs-11); }
+
+/* Actions keep every control the old card had; the destructive one is pushed to
+   the end so it is never the first thing under the cursor. */
+.vl-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+  justify-content: flex-end;
+  align-items: flex-start;
+}
+
+.vl-more { grid-column: 1 / -1; }
+.vl-more > summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--ink-muted);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  padding: var(--s-2) 0 0;
+  width: max-content;
+}
+.vl-more > summary::-webkit-details-marker { display: none; }
+.vl-more > summary::after { content: "показать"; color: var(--ink-faint); font-weight: 500; margin-left: var(--s-2); }
+.vl-more[open] > summary::after { content: "скрыть"; }
+.vl-more-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--s-2) var(--s-4);
+  padding: var(--s-3) 0 var(--s-1);
+}
+.vl-more-body .vl-kv { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.vl-more-body .vl-k { color: var(--ink-faint); font-size: var(--fs-11); }
+.vl-more-body .vl-v {
+  font-size: var(--fs-12);
+  color: var(--ink);
+  overflow-wrap: break-word;
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+}
+.vl-more-body .vl-v.is-mono { font-family: var(--font-num); }
+
+/* Narrow panel, including a phone: name and state first, the rail underneath
+   across the full width, metrics two by two instead of hidden. No JS involved. */
+@media (max-width: 1080px) {
+  .vl-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--s-2) var(--s-3);
+  }
+  .vl-chan { grid-column: 1 / -1; }
+  .vl-metrics {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--s-1) var(--s-4);
+  }
+  .vl-acts { grid-column: 1 / -1; justify-content: flex-start; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vl-row { transition: none; }
+}

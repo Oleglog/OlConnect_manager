@@ -179,20 +179,8 @@ function randHex(bytes = 32) {
   return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
 }
 
-function fmtStatusDot(st) {
-  const map = { running: 'status-running', active: 'status-running', failed: 'status-failed' };
-  return map[st] || 'status-inactive';
-}
-
-function fmtStatusPill(st) {
-  if (st === 'running' || st === 'active') return { cls: 'status-pill-running', label: 'running' };
-  if (st === 'failed') return { cls: 'status-pill-failed', label: 'failed' };
-  if (st === 'unknown') return { cls: 'status-pill-inactive', label: 'unknown' };
-  return { cls: 'status-pill-inactive', label: st || 'inactive' };
-}
-
-// Human-readable transport label + room-setup hint for instance cards.
-// inst.transport is the raw OLCRTC_TRANSPORT value; inst.room_id is the doc URL.
+// Status wording lives in fmtInstanceState now: the card shows a Russian word
+// plus the hour of history, not a dot and a pill saying the same thing twice.
 function fmtTransportInfo(inst) {
   const t = (inst.transport || '').toLowerCase();
   const room = inst.room_id || '';
@@ -549,7 +537,7 @@ function renderSystemBlock(sys) {
 }
 
 function renderInstancesBlock(instances, instanceMemberships) {
-  const instSection = el('div', 'mb-8');
+  const instSection = el('div', 'mb-8 vl-section');
   const instHeader = el('div', 'flex items-center justify-between mb-4');
   instHeader.innerHTML = '<h2 class="text-lg font-semibold">Инстансы</h2>';
   const addInstBtn = el('button', 'btn btn-primary btn-sm');
@@ -755,14 +743,14 @@ function renderInstanceGroup(title, instances, subscription, entries, groupNumbe
   group.appendChild(header);
 
   const aliases = buildInstanceAliases(instances, subscription ? subscription.name : null, entries);
-  const grid = el('div', 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4');
-  instances.forEach(instance => grid.appendChild(renderInstanceCard(instance, {
+  const rows = el('div', 'vl-rows');
+  instances.forEach(instance => rows.appendChild(renderInstanceCard(instance, {
     displayName: aliases.get(String(instance.id)),
     subscription,
     color,
     groupNumber,
   })));
-  group.appendChild(grid);
+  group.appendChild(rows);
   return group;
 }
 
@@ -870,111 +858,195 @@ function withInstanceName(rawURI, name) {
   return rawURI.replace(/#.*$/, '') + '#' + encodeURIComponent(name);
 }
 
-function renderInstanceCard(inst, context = {}) {
-  const card = el('div', 'card card-hover instance-card p-4 flex flex-col gap-3');
-  const displayName = (inst.carrier === 'openflux' && inst.name) ? inst.name : (context.displayName || inst.name || inst.label);
-  const displayURI = withInstanceName(inst.uri, displayName);
+// One minute of the ribbon is one letter from /api/instances: L live, U flapping,
+// P at the limit, D dead, I stopped, and null when the panel has no measurement
+// for that minute. The panel never invents a state for a minute it did not
+// measure, and "no data" keeps a look of its own, apart from idle and from zero
+// traffic.
+const VL_STATE = {
+  L: { cls: 'is-live', word: 'жив' },
+  U: { cls: 'is-flapping', word: 'рвётся' },
+  P: { cls: 'is-limited', word: 'на пределе' },
+  D: { cls: 'is-dead', word: 'мёртв' },
+  I: { cls: 'is-idle', word: 'остановлен' },
+};
 
-  // Header: status + label
-  const head = el('div', 'flex items-center justify-between gap-2');
-  const left = el('div', 'flex items-center gap-2 min-w-0');
-  const dot = el('span', 'status-dot ' + fmtStatusDot(inst.status));
-  dot.setAttribute('aria-hidden', 'true');
-  const labelWrap = el('div', 'flex flex-col min-w-0');
-  const labelEl = el('div', 'font-semibold truncate');
-  labelEl.textContent = displayName;
-  const idEl = el('div', 'text-xs text-gray-500');
-  // The group number is repeated on the card: matching an instance to its
-  // group must not require scrolling back to the header.
-  const groupTag = context.groupNumber
-    ? String(context.groupNumber).padStart(2, '0') + ' · '
-    : '';
-  idEl.textContent = groupTag + '#' + inst.id + ' · ' + (inst.label || '');
-  if (inst.name && inst.name !== displayName) idEl.title = 'Имя в конфигурации: ' + inst.name;
-  labelWrap.appendChild(labelEl);
-  labelWrap.appendChild(idEl);
-  left.appendChild(dot);
-  left.appendChild(labelWrap);
-  const pill = fmtStatusPill(inst.status);
-  const pillEl = el('span', 'status-pill ' + pill.cls);
-  pillEl.textContent = pill.label;
-  head.appendChild(left);
-  head.appendChild(pillEl);
-  card.appendChild(head);
+// fmtInstanceHistory folds the ribbon into runs so the rail is a handful of
+// elements instead of sixty, and counts what the state line explains.
+function fmtInstanceHistory(inst) {
+  const history = Array.isArray(inst.history) ? inst.history : [];
+  const runs = [];
+  const counts = { L: 0, U: 0, P: 0, D: 0, I: 0, gap: 0 };
+  let rejects = 0;
+  history.forEach(slot => {
+    const code = slot && typeof slot.state === 'string' ? slot.state : '';
+    const key = code && VL_STATE[code] ? code : 'gap';
+    counts[key] += 1;
+    if (slot && slot.rejects) rejects += slot.rejects;
+    const cls = key === 'gap' ? 'is-gap' : VL_STATE[key].cls;
+    const last = runs[runs.length - 1];
+    if (last && last.cls === cls) last.n += 1;
+    else runs.push({ cls, n: 1 });
+  });
+  return {
+    history,
+    runs,
+    counts,
+    rejects,
+    // history_complete === false is the normal case right after the panel
+    // restarts: the ring has not filled an hour yet. It is not an error.
+    complete: inst.history_complete !== false,
+  };
+}
 
-  // Badges
-  const badges = el('div', 'flex flex-wrap gap-1.5');
+// fmtInstanceState answers "how is this channel now". The newest measured minute
+// wins; when it has no data, systemd decides, and the line says so instead of
+// guessing a channel state.
+function fmtInstanceState(inst, agg) {
+  const last = agg.history.length ? agg.history[agg.history.length - 1] : null;
+  const code = last && typeof last.state === 'string' ? last.state : '';
+  if (code && VL_STATE[code]) {
+    const entry = VL_STATE[code];
+    let why = '';
+    if (code === 'U' && agg.counts.U > 0) why = '(' + agg.counts.U + ' мин с разрывом)';
+    else if (code === 'P' && agg.rejects > 0) why = '(429: ' + agg.rejects + ')';
+    else if (code === 'P') why = '(у предела)';
+    return { cls: entry.cls, word: entry.word, why };
+  }
+  const measured = agg.history.length > 0;
+  const since = measured ? '(нет данных за последнюю минуту)' : '(истории пока нет)';
+  if (inst.status === 'failed') return { cls: 'is-dead', word: 'мёртв', why: measured ? '' : since };
+  if (inst.status === 'running' || inst.status === 'active') return { cls: 'is-live', word: 'жив', why: since };
+  return { cls: 'is-idle', word: 'остановлен', why: '' };
+}
+
+function renderInstanceIdentity(inst, context, displayName) {
+  const box = el('div', 'vl-id');
+  box.appendChild(el('div', 'vl-name', displayName));
+  // The group number is repeated on the row: matching an instance to its group
+  // must not require scrolling back to the header.
+  const groupTag = context.groupNumber ? String(context.groupNumber).padStart(2, '0') + ' · ' : '';
+  const sub = el('div', 'vl-sub', groupTag + '#' + inst.id + ' · ' + (inst.label || ''));
+  if (inst.name && inst.name !== displayName) sub.title = 'Имя в конфигурации: ' + inst.name;
+  box.appendChild(sub);
+  return box;
+}
+
+function renderInstanceChannel(inst, agg) {
+  const box = el('div', 'vl-chan');
+  const state = fmtInstanceState(inst, agg);
+  const stateEl = el('div', 'vl-state ' + state.cls);
+  stateEl.appendChild(el('span', '', state.word));
+  if (state.why) stateEl.appendChild(el('span', 'vl-why', state.why));
+  box.appendChild(stateEl);
+
+  if (agg.runs.length === 0) {
+    box.appendChild(el('div', 'vl-rail-empty', 'истории пока нет, рейка начнётся с первой минуты'));
+    return box;
+  }
+
+  const rail = el('div', 'vl-rail');
+  rail.title = 'последний час, минута на деление: жив ' + agg.counts.L +
+    ', рвётся ' + agg.counts.U + ', на пределе ' + agg.counts.P +
+    ', мёртв ' + agg.counts.D + ', остановлен ' + agg.counts.I +
+    ', нет данных ' + agg.counts.gap;
+  agg.runs.forEach(run => {
+    const tick = el('i', 'vl-run ' + run.cls);
+    tick.style.flexGrow = String(run.n);
+    rail.appendChild(tick);
+  });
+  box.appendChild(rail);
+
+  const cap = el('div', 'vl-rail-cap');
+  cap.appendChild(el('span', '', '−60 мин'));
+  if (!agg.complete) cap.appendChild(el('span', 'vl-partial', 'данных пока меньше часа'));
+  cap.appendChild(el('span', '', 'сейчас'));
+  box.appendChild(cap);
+  return box;
+}
+
+function renderInstanceMetrics(inst) {
+  const box = el('div', 'vl-metrics');
+  const usageLine = el('div', 'vl-metric-line');
+  // The polling loop rewrites this node in place every ten seconds
+  // (applyUsageSnapshot -> setUsageBadge), so it keeps its data attribute and
+  // the badge class the setter expects.
   const usageBadge = el('span', 'badge');
   usageBadge.dataset.instanceUsage = String(inst.id);
   setUsageBadge(usageBadge, inst);
-  const carrierBadge = el('span', 'badge badge-blue');
-  carrierBadge.innerHTML = icon('tag', 12) + '<span>' + (inst.carrier || '-') + '</span>';
-  const transportBadge = el('span', 'badge');
-  // Human-readable transport names + room-setup hints: raw values like
-  // "vyandex"/"cupsonline" mean nothing at a glance. Mirrors
-  // ProfileEditorDialog.kt labels on the Android client.
+  usageLine.appendChild(usageBadge);
   const transportInfo = fmtTransportInfo(inst);
-  transportBadge.innerHTML = icon('wifi', 12) + '<span>' + transportInfo.label + '</span>';
-  if (transportInfo.hint) transportBadge.title = transportInfo.hint;
-  badges.appendChild(usageBadge);
-  badges.appendChild(carrierBadge);
-  badges.appendChild(transportBadge);
-  if (context.subscription) {
-    const subscriptionBadge = el('span', 'badge');
-    subscriptionBadge.textContent = context.subscription.name;
-    if (context.color) subscriptionBadge.style.borderColor = context.color.border;
-    badges.appendChild(subscriptionBadge);
-  }
-  if (inst.carrier === 'jitsi') {
-    const bridgeBadge = el('span', 'badge');
-    bridgeBadge.innerHTML = icon('sliders-horizontal', 12) + '<span>bridge: ' + (inst.jitsi_bridge_mode || 'auto') + '</span>';
-    bridgeBadge.title = 'Jitsi bridge mode: auto, colibri-ws или sctp';
-    badges.appendChild(bridgeBadge);
-  }
-  if (inst.carrier === 'wbstream' && (!inst.room_id || inst.room_id === 'any')) {
-    const noRoomBadge = el('span', 'badge badge-amber');
-    noRoomBadge.innerHTML = icon('alert-triangle', 12) + '<span>Room ID required</span>';
-    noRoomBadge.title = 'wbstream больше не создаёт румы автоматически — задайте Room ID в настройках инстанса';
-    badges.appendChild(noRoomBadge);
-  }
-  if (inst.carrier === 'wbstream' && inst.auth_token_expired) {
-    const expiredBadge = el('span', 'badge badge-amber');
-    expiredBadge.innerHTML = icon('alert-circle', 12) + '<span>Токен истёк</span>';
-    expiredBadge.title = inst.auth_token_expires_at
-      ? 'Истёк ' + new Date(inst.auth_token_expires_at * 1000).toLocaleString()
-      : 'Обновите общий WB-токен в Настройках';
-    badges.appendChild(expiredBadge);
-  }
-  if (inst.carrier === 'openflux') {
-    if (inst.has_openflux_key) {
-      const encBadge = el('span', 'badge badge-emerald');
-      encBadge.innerHTML = icon('lock', 12) + '<span>AES-256-GCM</span>';
-      encBadge.title = 'Шифрование OpenFlux включено (AES-256-GCM)';
-      badges.appendChild(encBadge);
-    } else {
-      const noEncBadge = el('span', 'badge');
-      noEncBadge.innerHTML = icon('unlock', 12) + '<span>без шифрования</span>';
-      noEncBadge.title = 'Шифрование OpenFlux отключено. Для включения укажите ключ в настройках инстанса';
-      badges.appendChild(noEncBadge);
-    }
-  }
-  if (inst.uptime) {
-    const upBadge = el('span', 'badge');
-    upBadge.innerHTML = icon('clock', 12) + '<span>' + inst.uptime + '</span>';
-    badges.appendChild(upBadge);
-  }
-  card.appendChild(badges);
+  const transportChip = el('span', 'vl-uptime', transportInfo.label);
+  if (transportInfo.hint) transportChip.title = transportInfo.hint;
+  usageLine.appendChild(transportChip);
+  box.appendChild(usageLine);
+  if (inst.uptime) box.appendChild(el('div', 'vl-uptime', 'uptime ' + inst.uptime));
+  return box;
+}
 
-  // Meta rows
-  const meta = el('div', 'space-y-1.5 text-xs');
-  meta.appendChild(metaRow(inst.carrier === 'openflux' ? 'Ссылка на документ' : 'Room ID', inst.room_id || '—', inst.room_id));
+// Everything the old card printed as badges and meta rows lives here, collapsed
+// but reachable: these are keys people copy by hand, so nothing is dropped.
+function renderInstanceService(inst, context) {
+  const more = el('details', 'vl-more');
+  more.appendChild(el('summary', '', 'Служебное'));
+  const body = el('div', 'vl-more-body');
+
+  body.appendChild(metaRow(inst.carrier === 'openflux' ? 'Ссылка на документ' : 'Room ID', inst.room_id || '—', inst.room_id));
   if (inst.has_auth_token) {
-    meta.appendChild(metaRow('Auth token', 'задан', 'QR включает токен для импорта полного профиля'));
+    body.appendChild(metaRow('Auth token', 'задан', 'QR включает токен для импорта полного профиля'));
+  } else {
+    body.appendChild(metaRow('Auth token', 'не задан'));
   }
-  card.appendChild(meta);
+  if (inst.auth_token_expires_at) {
+    const expires = new Date(inst.auth_token_expires_at * 1000).toLocaleString();
+    body.appendChild(metaRow('Токен истекает', (inst.auth_token_expired ? 'истёк ' : '') + expires));
+  }
+
+  const transportInfo = fmtTransportInfo(inst);
+  const facts = [
+    ['Носитель', inst.carrier || '-'],
+    ['Транспорт', transportInfo.label],
+  ];
+  if (inst.openflux_codec) facts.push(['Кодек', inst.openflux_codec]);
+  const vp8 = [];
+  if (inst.vp8_fps) vp8.push(inst.vp8_fps + ' fps');
+  if (inst.vp8_batch) vp8.push('пакет ' + inst.vp8_batch);
+  if (vp8.length) facts.push(['Видеоканал', vp8.join(', ')]);
+  if (inst.carrier === 'openflux') {
+    facts.push(['Шифрование', inst.has_openflux_key ? 'AES-256-GCM' : 'без шифрования']);
+  }
+  if (inst.carrier === 'jitsi') facts.push(['Bridge', inst.jitsi_bridge_mode || 'auto']);
+  if (inst.client_id) facts.push(['Client ID', inst.client_id]);
+  if (inst.dns) facts.push(['DNS', inst.dns]);
+  if (inst.socks_proxy) facts.push(['SOCKS', inst.socks_proxy]);
+  if (inst.warp_proxy) facts.push(['WARP', inst.warp_proxy]);
+  if (context.subscription) facts.push(['Подписка', context.subscription.name]);
+  if (inst.name && inst.name !== (context.displayName || inst.name)) facts.push(['Имя в конфигурации', inst.name]);
+
+  facts.forEach(pair => {
+    const cell = el('div', 'vl-kv');
+    cell.appendChild(el('div', 'vl-k', pair[0]));
+    const value = el('div', 'vl-v is-mono', pair[1]);
+    cell.appendChild(value);
+    body.appendChild(cell);
+  });
+
+  more.appendChild(body);
+  return more;
+}
+
+function renderInstanceCard(inst, context = {}) {
+  const row = el('div', 'vl-row');
+  const displayName = (inst.carrier === 'openflux' && inst.name) ? inst.name : (context.displayName || inst.name || inst.label);
+  const displayURI = withInstanceName(inst.uri, displayName);
+  const agg = fmtInstanceHistory(inst);
+
+  row.appendChild(renderInstanceIdentity(inst, context, displayName));
+  row.appendChild(renderInstanceChannel(inst, agg));
+  row.appendChild(renderInstanceMetrics(inst));
 
   // Actions
-  const actions = el('div', 'flex flex-wrap gap-1.5 mt-1');
+  const actions = el('div', 'vl-acts');
   const uriBtn = el('button', 'btn btn-secondary btn-sm');
   uriBtn.setAttribute('aria-label', 'Копировать URI');
   uriBtn.innerHTML = icon('copy') + '<span>URI</span>';
@@ -1085,8 +1157,9 @@ function renderInstanceCard(inst, context = {}) {
     };
     actions.appendChild(delBtn);
   }
-  card.appendChild(actions);
-  return card;
+  row.appendChild(actions);
+  row.appendChild(renderInstanceService(inst, { ...context, displayName }));
+  return row;
 }
 
 function metaRow(label, value, copyValue) {
