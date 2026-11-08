@@ -1,0 +1,96 @@
+/* Hallmark · v2.0.0 · scope: app · genre: modern-minimal · shape: Rail · theme: custom (no deal) · signature: the rail, one hour of channel state as ticks that survive at 12px */
+/* Critique: the rail is the only graphic that repeats on every row, so scanning does not depend on reading; the accent appears for identity and the primary action only, never for state. */
+/* waive 58: app scope, a monitoring screen carries its data density; copy stays under 40 words per row. */
+/* waive 41: accent-ink sits on the accent only and never on the page background. */
+:root {
+  /* Brand accent: identity and primary action only. Never a status. */
+  --accent: #c6f24e;
+  --accent-ink: #1b2205;
+  --accent-dim: #9dc23a;
+
+  /* Status ramp. Separated by hue and lightness so they read apart at 12px. */
+  --st-live: #37c08b;
+  --st-live-ink: #062b1e;
+  --st-degraded: #e8b23a;
+  --st-degraded-ink: #2b1f04;
+  --st-warn: #e2703a;
+  --st-warn-ink: #2e1106;
+  --st-down: #e05252;
+  --st-down-ink: #2d0808;
+  --st-idle: #8a9791;
+  --st-idle-ink: #101412;
+
+  /* Graphite surfaces (dark is the product default: this is a monitoring tool). */
+  --bg: #0e1211;
+  --bg-deep: #0a0d0c;
+  --surface: #151a18;
+  --surface-raised: #1c2320;
+  --surface-hover: #222a26;
+  --line: #26302b;
+  --line-strong: #37453e;
+  --ink: #e8ede9;
+  --ink-muted: #a7b3ac;
+  --ink-faint: #74827b;
+  --overlay: rgba(6, 9, 8, 0.72);
+  --mask-ink: #000;
+
+  /* Type */
+  --font-ui: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-num: "JetBrains Mono", ui-monospace, monospace;
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-20: 20px;
+  --fs-26: 26px;
+  --fs-34: 34px;
+  --lh-tight: 1.15;
+  --lh-body: 1.5;
+
+  /* Space, grid, shape */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --r-1: 4px;
+  --r-2: 8px;
+  --r-3: 12px;
+  --shell-max: 1280px;
+  --measure: 68ch;
+  --shadow-overlay: 0 20px 48px rgba(0, 0, 0, 0.55);
+  --dur: 120ms;
+  --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
+}
+
+[data-theme="light"] {
+  --accent: #5c7700;
+  --accent-ink: #f8fbef;
+  --accent-dim: #6f8f00;
+  --st-live: #167a54;
+  --st-live-ink: #f0faf5;
+  --st-degraded: #8a5f00;
+  --st-degraded-ink: #fdf6e6;
+  --st-warn: #a8451a;
+  --st-warn-ink: #fdf1ea;
+  --st-down: #a52a2a;
+  --st-down-ink: #fdeeee;
+  --st-idle: #5f6b66;
+  --st-idle-ink: #f5f6f4;
+  --bg: #f4f6ef;
+  --bg-deep: #eaeee4;
+  --surface: #fdfefb;
+  --surface-raised: #f7f9f2;
+  --surface-hover: #eef2e6;
+  --line: #dfe4d8;
+  --line-strong: #c3cbb9;
+  --ink: #14181a;
+  --ink-muted: #55605b;
+  --ink-faint: #7d8a84;
+  --overlay: rgba(20, 24, 22, 0.4);
+  --shadow-overlay: 0 20px 48px rgba(20, 30, 20, 0.2);
+  --mask-ink: #000;
+}
