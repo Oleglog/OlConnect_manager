@@ -7,6 +7,8 @@ let creds = JSON.parse(localStorage.getItem('olcrtc_creds') || 'null'); // {user
 let loginNotice = ''; // one-shot message shown on the login screen
 let usagePollTimer = null;
 const latestInstanceUsage = new Map();
+// Version shown in the sidebar footer, from the last /system/status response.
+let panelVersion = '';
 
 const JITSI_PRESETS = [
   { host: 'meet.jit.si', label: 'meet.jit.si', preferred: true, note: 'official, baseline' },
@@ -326,7 +328,12 @@ function render() {
 }
 window.addEventListener('popstate', render);
 
-// Shared layout: vertical sidebar (horizontal tabs on narrow screens) + content.
+// Shared layout, transplanted from the approved mockup (ofx-design/admin-instances.html):
+// .shell > aside.side (brand + nav + nav-foot) and main.main. The sidebar's own
+// classes, the old app-shell grid and its link styles are gone; the frame now
+// comes from base.css, the mockup's own stylesheet.
+const BRAND_MARK = '<svg class="brand-mark" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>';
+
 function renderShell(activeSection) {
   const sections = [
     { id: 'system', label: 'Система', icon: 'shield' },
@@ -335,31 +342,39 @@ function renderShell(activeSection) {
     { id: 'settings', label: 'Настройки', icon: 'settings' },
   ];
 
-  const shell = el('div', 'app-shell');
-  const sidebar = el('nav', 'sidebar');
+  const shell = el('div', 'shell');
 
-  const brand = el('div', 'sidebar-brand');
-  brand.innerHTML = renderBrandLogo(26);
-  sidebar.appendChild(brand);
+  const side = el('aside', 'side');
+  const brand = el('div', 'brand');
+  brand.innerHTML = BRAND_MARK + '<span class="brand-name">olcRTC<span class="brand-tail"> panel</span></span>';
+  side.appendChild(brand);
 
+  const nav = el('nav', 'nav');
+  nav.setAttribute('aria-label', 'Разделы');
   sections.forEach((s) => {
-    const link = el('button', 'sidebar-link' + (s.id === activeSection ? ' sidebar-link-active' : ''));
-    link.innerHTML = icon(s.icon, 16) + '<span>' + s.label + '</span>';
-    link.setAttribute('aria-label', s.label);
-    link.onclick = () => route('/' + s.id);
-    sidebar.appendChild(link);
+    const item = el('button', 'nav-item');
+    if (s.id === activeSection) item.setAttribute('aria-current', 'true');
+    item.innerHTML = icon(s.icon, 16) + s.label;
+    item.setAttribute('aria-label', s.label);
+    item.onclick = () => route('/' + s.id);
+    nav.appendChild(item);
   });
+  side.appendChild(nav);
 
-  const footer = el('div', 'sidebar-footer');
-  const logoutBtn = el('button', 'sidebar-link');
+  // The mockup's nav-foot carries the version; the logout control the panel needs
+  // and the mockup does not show sits there too, in the same class.
+  const foot = el('div', 'nav-foot');
+  const versionLine = el('div', '', 'Версия ' + (panelVersion || '—'));
+  foot.appendChild(versionLine);
+  const logoutBtn = el('button', 'nav-item');
+  logoutBtn.innerHTML = icon('log-out', 16) + 'Выход';
   logoutBtn.setAttribute('aria-label', 'Выход');
-  logoutBtn.innerHTML = icon('log-out') + '<span>Выход</span>';
   logoutBtn.onclick = () => { creds = null; localStorage.removeItem('olcrtc_creds'); route('/login'); };
-  footer.appendChild(logoutBtn);
-  sidebar.appendChild(footer);
+  foot.appendChild(logoutBtn);
+  side.appendChild(foot);
 
-  const main = el('main', 'sidebar-main');
-  shell.appendChild(sidebar);
+  const main = el('main', 'main');
+  shell.appendChild(side);
   shell.appendChild(main);
   return { shell, main };
 }
@@ -466,18 +481,50 @@ async function renderDashboard(app, section) {
     }
   }
 
-  const wrap = el('div', 'max-w-6xl mx-auto');
+  panelVersion = sys.version || '';
+  const head = renderPageHead(section, section === 'instances'
+    ? renderInstancesHead(instances, instanceMemberships)
+    : { title: SECTION_TITLES[section] || '', sub: '', action: null });
+  main.appendChild(head);
+
+  const bodyEl = el('div', 'body');
   if (section === 'instances') {
-    wrap.appendChild(renderInstancesBlock(instances, instanceMemberships));
+    renderInstancesBlock(bodyEl, instances, instanceMemberships);
   } else if (section === 'subscriptions') {
-    wrap.appendChild(renderSubscriptionsBlock(subs, subsError, instances, sys));
+    bodyEl.appendChild(renderSubscriptionsBlock(subs, subsError, instances, sys));
   } else {
-    wrap.appendChild(renderSystemBlock(sys));
+    bodyEl.appendChild(renderSystemBlock(sys));
   }
-  main.appendChild(wrap);
+  main.appendChild(bodyEl);
 
   app.appendChild(frame.shell);
   startUsagePolling();
+}
+
+const SECTION_TITLES = {
+  system: 'Система',
+  instances: 'Инстансы',
+  subscriptions: 'Подписки',
+  settings: 'Настройки',
+};
+
+// .head exactly as the mockup has it: h1, a one-line sub, and the screen's one
+// primary action on the right.
+function renderPageHead(section, parts) {
+  const head = el('div', 'head');
+  const left = el('div', '');
+  left.appendChild(el('h1', '', parts.title));
+  if (parts.sub) left.appendChild(el('p', 'sub', parts.sub));
+  head.appendChild(left);
+  if (parts.action) head.appendChild(parts.action);
+  return head;
+}
+
+function makePrimaryButton(label, onClick) {
+  const btn = el('button', 'btn btn-primary');
+  btn.innerHTML = icon('plus') + label;
+  btn.onclick = onClick;
+  return btn;
 }
 
 function renderSystemBlock(sys) {
@@ -530,25 +577,50 @@ function renderSystemBlock(sys) {
   return container;
 }
 
-function renderInstancesBlock(instances, instanceMemberships) {
-  const instSection = el('div', 'mb-8 vl-section');
-  const instHeader = el('div', 'flex items-center justify-between mb-4');
-  instHeader.innerHTML = '<h2 class="text-lg font-semibold">Инстансы</h2>';
-  const addInstBtn = el('button', 'btn btn-primary btn-sm');
-  addInstBtn.setAttribute('aria-label', 'Создать инстанс');
-  addInstBtn.innerHTML = icon('plus') + '<span>Создать инстанс</span>';
-  addInstBtn.onclick = () => showCreateInstanceModal();
-  instHeader.appendChild(addInstBtn);
-  instSection.appendChild(instHeader);
+// .head of the instances screen, from the mockup: «9 инстансов: 6 активны,
+// 3 остановлены. По каналу: 1 рвётся, 1 на пределе» and the one primary action.
+function renderInstancesHead(instances, memberships) {
+  const total = instances.length;
+  const running = instances.filter(i => i.status === 'running' || i.status === 'active').length;
+  const stopped = total - running;
+  let flapping = 0;
+  let limited = 0;
+  instances.forEach(inst => {
+    const state = fmtInstanceState(inst, fmtInstanceHistory(inst));
+    if (state.cls === 's-degraded') flapping += 1;
+    else if (state.cls === 's-warn') limited += 1;
+  });
+  const parts = [total + ' ' + pluralInstances(total) + ':'];
+  const counts = [];
+  if (running) counts.push(running + ' активны');
+  if (stopped) counts.push(stopped + ' остановлены');
+  let sub = parts.concat(counts.join(', ')).join(' ');
+  const channel = [];
+  if (flapping) channel.push(flapping + ' рвётся');
+  if (limited) channel.push(limited + ' на пределе');
+  if (channel.length) sub += '. По каналу: ' + channel.join(', ');
+  return {
+    title: 'Инстансы',
+    sub,
+    action: makePrimaryButton('Добавить', () => showCreateInstanceModal()),
+  };
+}
 
+// One panel per group, exactly the mockup's panel > panel-head > rows shape.
+function renderInstancesBlock(container, instances, instanceMemberships) {
   if (instances.length === 0) {
-    const empty = el('div', 'card p-6 text-center text-gray-400 text-sm');
-    empty.textContent = 'Инстансов нет. Создайте первый кнопкой выше.';
-    instSection.appendChild(empty);
-  } else {
-    instSection.appendChild(renderInstanceGroups(instances, instanceMemberships));
+    const panel = el('section', 'panel');
+    const head = el('div', 'panel-head');
+    head.appendChild(el('h2', '', 'Инстансов нет'));
+    panel.appendChild(head);
+    const facts = el('div', 'facts');
+    facts.appendChild(el('div', 'fact-v', 'Создайте первый инстанс кнопкой «Добавить» в шапке.'));
+    panel.appendChild(facts);
+    container.appendChild(panel);
+    return container;
   }
-  return instSection;
+  container.appendChild(renderInstanceGroups(instances, instanceMemberships));
+  return container;
 }
 
 function renderSubscriptionsBlock(subs, subsError, instances, sys) {
@@ -626,25 +698,6 @@ function applyUsageSnapshot(snapshot) {
   if (total) total.textContent = String(Number(snapshot.active_peers) || 0);
 }
 
-function setUsageBadge(node, usage) {
-  node.className = 'badge';
-  if (!usage.usage_known) {
-    node.textContent = 'Нет данных';
-    node.title = 'Сервис ещё не опубликовал состояние подключений';
-    return;
-  }
-  if (usage.active_peers > 0) {
-    node.classList.add('badge-amber');
-    node.textContent = 'Используется · ' + usage.active_peers;
-    node.title = usage.oldest_connected_at
-      ? 'Самое раннее подключение: ' + new Date(usage.oldest_connected_at).toLocaleString()
-      : 'Есть активные подключения';
-    return;
-  }
-  node.classList.add('badge-emerald');
-  node.textContent = 'Свободен';
-  node.title = 'Активных подключений нет';
-}
 
 async function confirmBusyInstance(inst, action) {
   const usage = await refreshInstanceUsage(inst);
@@ -667,7 +720,7 @@ async function refreshInstanceUsage(inst) {
 }
 
 function renderInstanceGroups(instances, memberships) {
-  const root = el('div', 'space-y-4');
+  const root = el('div', '');
   // Group numbers are assigned in render order so "01" is always the first
   // block on screen. A user matches an instance to its group by number first,
   // shade second — on a monochrome canvas two adjacent greys are hard to tell
@@ -675,7 +728,7 @@ function renderInstanceGroups(instances, memberships) {
   let groupNumber = 0;
   if (!memberships) {
     root.appendChild(renderInstanceGroup('Все инстансы', instances, null));
-    root.appendChild(el('div', 'text-xs text-gray-500', 'Принадлежность к подпискам временно недоступна. Показан общий список.'));
+    root.appendChild(el('p', 'hint', 'Принадлежность к подпискам временно недоступна. Показан общий список.'));
     return root;
   }
 
@@ -705,47 +758,48 @@ function renderInstanceGroups(instances, memberships) {
   return root;
 }
 
+// A group is one panel, as in the mockup: the title and its one-line hint sit in
+// panel-head, the channels are rows under hairlines inside it.
 function renderInstanceGroup(title, instances, subscription, entries, groupNumber = 0) {
-  const group = el('section', 'instance-group');
-  const color = subscription ? subscriptionGroupColor(subscription.slug) : null;
-  if (color) {
-    group.classList.add('instance-group-subscription');
-    group.style.setProperty('--instance-group-accent', color.accent);
-    group.style.setProperty('--instance-group-border', color.border);
-    group.style.setProperty('--instance-group-bg', color.background);
-  }
+  const panel = el('section', 'panel');
 
-  const header = el('div', 'instance-group-header');
-  const heading = el('div', 'flex items-center gap-2 min-w-0');
-  if (groupNumber > 0) {
-    const marker = el('span', 'instance-group-marker' + (color ? '' : ' is-plain'));
-    marker.textContent = String(groupNumber).padStart(2, '0');
-    marker.title = 'Группа ' + groupNumber;
-    heading.appendChild(marker);
-  }
-  const text = el('div', 'min-w-0');
-  text.appendChild(el('div', 'font-semibold truncate', title));
-  text.appendChild(el('div', 'text-xs text-gray-500', instances.length + ' ' + pluralInstances(instances.length)));
-  heading.appendChild(text);
-  header.appendChild(heading);
-  if (subscription) {
-    const slug = el('span', 'badge');
-    slug.textContent = subscription.slug;
-    slug.style.borderColor = color.border;
-    header.appendChild(slug);
-  }
-  group.appendChild(header);
+  const head = el('div', 'panel-head');
+  const heading = el('div', '');
+  const numbered = groupNumber > 0 ? String(groupNumber).padStart(2, '0') + ' ' + title : title;
+  heading.appendChild(el('h2', '', numbered));
+  head.appendChild(heading);
+  const hintBits = [instances.length + ' ' + pluralInstances(instances.length)];
+  if (subscription) hintBits.push(subscription.slug);
+  head.appendChild(el('span', 'hint', hintBits.join(', ')));
+  panel.appendChild(head);
 
   const aliases = buildInstanceAliases(instances, subscription ? subscription.name : null, entries);
-  const rows = el('div', 'vl-rows');
+  const rows = el('div', 'rows');
   instances.forEach(instance => rows.appendChild(renderInstanceCard(instance, {
     displayName: aliases.get(String(instance.id)),
     subscription,
-    color,
     groupNumber,
   })));
-  group.appendChild(rows);
-  return group;
+  panel.appendChild(rows);
+
+  // details.more with the facts the mockup keeps behind a click.
+  const more = el('details', 'more');
+  more.appendChild(el('summary', '', 'Служебное группы'));
+  const facts = el('div', 'facts');
+  const factPairs = [
+    ['Инстансов в группе', String(instances.length)],
+    ['Активных', String(instances.filter(i => i.status === 'running' || i.status === 'active').length)],
+  ];
+  if (subscription) factPairs.push(['Подписка', subscription.slug]);
+  factPairs.forEach(pair => {
+    const cell = el('div', '');
+    cell.appendChild(el('div', 'fact-k', pair[0]));
+    cell.appendChild(el('div', 'fact-v num', pair[1]));
+    facts.appendChild(cell);
+  });
+  more.appendChild(facts);
+  panel.appendChild(more);
+  return panel;
 }
 
 function buildInstanceAliases(instances, subscriptionName, entries = []) {
@@ -810,35 +864,6 @@ function cleanInstanceNamePart(value) {
     .replace(/[^\p{L}\p{N}]+/gu, '_')
     .replace(/^_+|_+$/g, '');
 }
-
-// Group colours are steps of one grey scale, not hues. A subscription still
-// gets a stable, distinct identity (same slug -> same step), but the panel
-// stays black & white and the identity never competes with a status colour.
-// Eight steps is the practical ceiling: past that, adjacent steps stop being
-// distinguishable on a dark canvas.
-// Group identity is a hue, not a shade. A monochrome ramp failed in practice:
-// two adjacent greys on a near-black canvas read as "the same grey", so the
-// user could not tell which instance belonged to which subscription.
-//
-// The palette is deliberately narrow and desaturated — six hues, all around
-// 55% lightness so none of them outranks a status colour — and it is separate
-// from the monochrome chrome. The UI stays black & white except for this one
-// job, where colour is the actual information.
-const GROUP_HUES = [200, 275, 145, 25, 320, 175];
-
-function subscriptionGroupColor(value) {
-  let hash = 0;
-  for (const char of String(value || 'subscription')) hash = ((hash * 31) + char.codePointAt(0)) | 0;
-  const hue = GROUP_HUES[Math.abs(hash) % GROUP_HUES.length];
-  return {
-    accent: `hsl(${hue} 62% 56%)`,
-    border: `hsl(${hue} 55% 48%)`,
-    // A low-alpha wash of the same hue keeps the block readable on black
-    // without turning it into a coloured slab.
-    background: `hsl(${hue} 55% 45% / 0.10)`,
-  };
-}
-
 function pluralInstances(count) {
   const mod10 = count % 10;
   const mod100 = count % 100;
@@ -852,21 +877,23 @@ function withInstanceName(rawURI, name) {
   return rawURI.replace(/#.*$/, '') + '#' + encodeURIComponent(name);
 }
 
-// One minute of the ribbon is one letter from /api/instances: L live, U flapping,
-// P at the limit, D dead, I stopped, and null when the panel has no measurement
-// for that minute. The panel never invents a state for a minute it did not
-// measure, and "no data" keeps a look of its own, apart from idle and from zero
-// traffic.
-const VL_STATE = {
-  L: { cls: 'is-live', word: 'жив' },
-  U: { cls: 'is-flapping', word: 'рвётся' },
-  P: { cls: 'is-limited', word: 'на пределе' },
-  D: { cls: 'is-dead', word: 'мёртв' },
-  I: { cls: 'is-idle', word: 'остановлен' },
-};
 
 // fmtInstanceHistory folds the ribbon into runs so the rail is a handful of
 // elements instead of sixty, and counts what the state line explains.
+// One minute of the ribbon is one letter from /api/instances: L live, U flapping,
+// P at the limit, D dead, I stopped, and null when the panel has no measurement
+// for that minute. The panel never invents a state for a minute it did not
+// measure, and "no data" draws as nothing rather than as idle.
+const VL_STATE = {
+  L: { cls: 's-live', word: 'жив', colour: 'var(--st-live)' },
+  U: { cls: 's-degraded', word: 'рвётся', colour: 'var(--st-degraded)' },
+  P: { cls: 's-warn', word: 'на пределе', colour: 'var(--st-warn)' },
+  D: { cls: 's-down', word: 'мёртв', colour: 'var(--st-down)' },
+  I: { cls: 's-idle', word: 'остановлен', colour: 'var(--st-idle)' },
+};
+
+// fmtInstanceHistory folds the ribbon into runs and counts what the state line
+// explains. Each run keeps its mockup class and the colour the mockup paints.
 function fmtInstanceHistory(inst) {
   const history = Array.isArray(inst.history) ? inst.history : [];
   const runs = [];
@@ -878,195 +905,163 @@ function fmtInstanceHistory(inst) {
     counts[key] += 1;
     if (slot && slot.rejects) rejects += slot.rejects;
     const cls = key === 'gap' ? 'is-gap' : VL_STATE[key].cls;
+    const colour = key === 'gap' ? 'transparent' : VL_STATE[key].colour;
     const last = runs[runs.length - 1];
     if (last && last.cls === cls) last.n += 1;
-    else runs.push({ cls, n: 1 });
+    else runs.push({ cls, colour, n: 1 });
   });
   return {
     history,
     runs,
     counts,
     rejects,
-    // history_complete === false is the normal case right after the panel
-    // restarts: the ring has not filled an hour yet. It is not an error.
+    // history_complete === false is normal right after the panel restarts: the
+    // ring has not filled an hour yet, and that is not an error.
     complete: inst.history_complete !== false,
   };
 }
 
 // fmtInstanceState answers "how is this channel now". The newest measured minute
-// wins; when it has no data, systemd decides, and the line says so instead of
-// guessing a channel state.
+// wins; when it has no data, systemd decides and the reason says so.
 function fmtInstanceState(inst, agg) {
   const last = agg.history.length ? agg.history[agg.history.length - 1] : null;
   const code = last && typeof last.state === 'string' ? last.state : '';
   if (code && VL_STATE[code]) {
     const entry = VL_STATE[code];
     let why = '';
-    if (code === 'U' && agg.counts.U > 0) why = '(' + agg.counts.U + ' мин с разрывом)';
-    else if (code === 'P' && agg.rejects > 0) why = '(429: ' + agg.rejects + ')';
+    if (code === 'U' && agg.counts.U > 0) why = '(разрывов за час: ' + agg.counts.U + ')';
+    else if (code === 'P' && agg.rejects > 0) why = '(429 за час: ' + agg.rejects + ')';
     else if (code === 'P') why = '(у предела)';
     return { cls: entry.cls, word: entry.word, why };
   }
   const measured = agg.history.length > 0;
   const since = measured ? '(нет данных за последнюю минуту)' : '(истории пока нет)';
-  if (inst.status === 'failed') return { cls: 'is-dead', word: 'мёртв', why: measured ? '' : since };
-  if (inst.status === 'running' || inst.status === 'active') return { cls: 'is-live', word: 'жив', why: since };
-  return { cls: 'is-idle', word: 'остановлен', why: '' };
+  if (inst.status === 'failed') return { cls: 's-down', word: 'мёртв', why: measured ? '' : since };
+  if (inst.status === 'running' || inst.status === 'active') return { cls: 's-live', word: 'жив', why: since };
+  return { cls: 's-idle', word: 'остановлен', why: '' };
 }
 
-function renderInstanceIdentity(inst, context, displayName) {
-  const box = el('div', 'vl-id');
-  box.appendChild(el('div', 'vl-name', displayName));
-  // The group number is repeated on the row: matching an instance to its group
-  // must not require scrolling back to the header.
-  const groupTag = context.groupNumber ? String(context.groupNumber).padStart(2, '0') + ' · ' : '';
-  const sub = el('div', 'vl-sub', groupTag + '#' + inst.id + ' · ' + (inst.label || ''));
-  if (inst.name && inst.name !== displayName) sub.title = 'Имя в конфигурации: ' + inst.name;
-  box.appendChild(sub);
-
-  // Wbstream cannot start without a room and cannot connect with an expired
-  // token. Those were amber badges; they stay on the row as a warning line,
-  // because they say why the channel will not come up, not just what it is.
-  if (inst.carrier === 'wbstream' && (!inst.room_id || inst.room_id === 'any')) {
-    const warn = el('div', 'vl-warn', 'нужен Room ID');
-    warn.title = 'wbstream больше не создаёт румы автоматически: задайте Room ID в настройках инстанса';
-    box.appendChild(warn);
-  }
-  if (inst.carrier === 'wbstream' && inst.auth_token_expired) {
-    const warn = el('div', 'vl-warn', 'токен истёк');
-    warn.title = inst.auth_token_expires_at
-      ? 'Истёк ' + new Date(inst.auth_token_expires_at * 1000).toLocaleString()
-      : 'Обновите общий WB-токен в Настройках';
-    box.appendChild(warn);
-  }
-  return box;
-}
-
-function renderInstanceChannel(inst, agg) {
-  const box = el('div', 'vl-chan');
-  const state = fmtInstanceState(inst, agg);
-  const stateEl = el('div', 'vl-state ' + state.cls);
-  stateEl.appendChild(el('span', '', state.word));
-  if (state.why) stateEl.appendChild(el('span', 'vl-why', state.why));
-  box.appendChild(stateEl);
-
-  if (agg.runs.length === 0) {
-    box.appendChild(el('div', 'vl-rail-empty', 'истории пока нет, рейка начнётся с первой минуты'));
-    return box;
-  }
-
-  const rail = el('div', 'vl-rail');
-  rail.title = 'последний час, минута на деление: жив ' + agg.counts.L +
-    ', рвётся ' + agg.counts.U + ', на пределе ' + agg.counts.P +
-    ', мёртв ' + agg.counts.D + ', остановлен ' + agg.counts.I +
-    ', нет данных ' + agg.counts.gap;
-  agg.runs.forEach(run => {
-    const tick = el('i', 'vl-run ' + run.cls);
-    tick.style.flexGrow = String(run.n);
-    rail.appendChild(tick);
+// The rail is drawn the way the mockup draws it: one strip per row, painted as a
+// linear-gradient of state segments, so the hour reads left to right without
+// sixty elements. Minutes with no data are transparent and show the tick mask.
+function fmtRailGradient(agg) {
+  const total = agg.runs.reduce((sum, run) => sum + run.n, 0) || 1;
+  let walked = 0;
+  const stops = agg.runs.map(run => {
+    const from = (walked / total) * 100;
+    walked += run.n;
+    const to = (walked / total) * 100;
+    return run.colour + ' ' + from.toFixed(2) + '% ' + to.toFixed(2) + '%';
   });
-  box.appendChild(rail);
-
-  const cap = el('div', 'vl-rail-cap');
-  cap.appendChild(el('span', '', '−60 мин'));
-  if (!agg.complete) cap.appendChild(el('span', 'vl-partial', 'данных пока меньше часа'));
-  cap.appendChild(el('span', '', 'сейчас'));
-  box.appendChild(cap);
-  return box;
+  return 'linear-gradient(90deg, ' + stops.join(', ') + ')';
 }
 
-function renderInstanceMetrics(inst) {
-  const box = el('div', 'vl-metrics');
-  const usageLine = el('div', 'vl-metric-line');
-  // The polling loop rewrites this node in place every ten seconds
-  // (applyUsageSnapshot -> setUsageBadge), so it keeps its data attribute and
-  // the badge class the setter expects.
-  const usageBadge = el('span', 'badge');
-  usageBadge.dataset.instanceUsage = String(inst.id);
-  setUsageBadge(usageBadge, inst);
-  usageLine.appendChild(usageBadge);
-  const transportInfo = fmtTransportInfo(inst);
-  const transportChip = el('span', 'vl-uptime', transportInfo.label);
-  if (transportInfo.hint) transportChip.title = transportInfo.hint;
-  usageLine.appendChild(transportChip);
-  box.appendChild(usageLine);
-  if (inst.uptime) box.appendChild(el('div', 'vl-uptime', 'uptime ' + inst.uptime));
-  return box;
-}
-
-// Everything the old card printed as badges and meta rows lives here, collapsed
-// but reachable: these are keys people copy by hand, so nothing is dropped.
-function renderInstanceService(inst, context) {
-  const more = el('details', 'vl-more');
-  more.appendChild(el('summary', '', 'Служебное'));
-  const body = el('div', 'vl-more-body');
-
-  body.appendChild(metaRow(inst.carrier === 'openflux' ? 'Ссылка на документ' : 'Room ID', inst.room_id || '—', inst.room_id));
-  if (inst.has_auth_token) {
-    body.appendChild(metaRow('Auth token', 'задан', 'QR включает токен для импорта полного профиля'));
+// The usage poll rewrites this node every ten seconds. It used to be a badge with
+// its own colours; the mockup puts the number in row-metric, so the setter keeps
+// the node in place and only changes the number and the wording.
+function setUsageBadge(node, usage) {
+  if (!usage.usage_known) {
+    node.className = 'nok num';
+    node.textContent = 'нет данных';
+    node.title = 'Сервис ещё не опубликовал состояние подключений';
+    return;
+  }
+  const peers = Number(usage.active_peers) || 0;
+  node.className = 'num';
+  node.textContent = String(peers);
+  if (peers > 0) {
+    node.title = usage.oldest_connected_at
+      ? 'Самое раннее подключение: ' + new Date(usage.oldest_connected_at).toLocaleString()
+      : 'Есть активные подключения';
   } else {
-    body.appendChild(metaRow('Auth token', 'не задан'));
+    node.title = 'Активных подключений нет';
   }
-  if (inst.auth_token_expires_at) {
-    const expires = new Date(inst.auth_token_expires_at * 1000).toLocaleString();
-    body.appendChild(metaRow('Токен истекает', (inst.auth_token_expired ? 'истёк ' : '') + expires));
-  }
-
-  const transportInfo = fmtTransportInfo(inst);
-  const facts = [
-    ['Носитель', inst.carrier || '-'],
-    ['Транспорт', transportInfo.label],
-  ];
-  if (inst.openflux_codec) facts.push(['Кодек', inst.openflux_codec]);
-  const vp8 = [];
-  if (inst.vp8_fps) vp8.push(inst.vp8_fps + ' fps');
-  if (inst.vp8_batch) vp8.push('пакет ' + inst.vp8_batch);
-  if (vp8.length) facts.push(['Видеоканал', vp8.join(', ')]);
-  if (inst.carrier === 'openflux') {
-    facts.push(['Шифрование', inst.has_openflux_key ? 'AES-256-GCM' : 'без шифрования']);
-  }
-  if (inst.carrier === 'jitsi') facts.push(['Bridge', inst.jitsi_bridge_mode || 'auto']);
-  if (inst.client_id) facts.push(['Client ID', inst.client_id]);
-  if (inst.dns) facts.push(['DNS', inst.dns]);
-  if (inst.socks_proxy) facts.push(['SOCKS', inst.socks_proxy]);
-  if (inst.warp_proxy) facts.push(['WARP', inst.warp_proxy]);
-  if (context.subscription) facts.push(['Подписка', context.subscription.name]);
-  if (inst.name && inst.name !== (context.displayName || inst.name)) facts.push(['Имя в конфигурации', inst.name]);
-
-  facts.forEach(pair => {
-    const cell = el('div', 'vl-kv');
-    cell.appendChild(el('div', 'vl-k', pair[0]));
-    const value = el('div', 'vl-v is-mono', pair[1]);
-    cell.appendChild(value);
-    body.appendChild(cell);
-  });
-
-  more.appendChild(body);
-  return more;
 }
 
+function peersWord(count) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'клиент';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'клиента';
+  return 'клиентов';
+}
+
+// A channel row, structurally identical to the mockup:
+// row > [ row-id + row-sub | chan ( state + rail + rail-label ) | row-metric | row-actions ]
 function renderInstanceCard(inst, context = {}) {
-  const row = el('div', 'vl-row');
+  const row = el('div', 'row');
   const displayName = (inst.carrier === 'openflux' && inst.name) ? inst.name : (context.displayName || inst.name || inst.label);
   const displayURI = withInstanceName(inst.uri, displayName);
   const agg = fmtInstanceHistory(inst);
 
-  row.appendChild(renderInstanceIdentity(inst, context, displayName));
-  row.appendChild(renderInstanceChannel(inst, agg));
-  row.appendChild(renderInstanceMetrics(inst));
+  const idBox = el('div', '');
+  idBox.appendChild(el('div', 'row-id', displayName));
+  const groupTag = context.groupNumber ? String(context.groupNumber).padStart(2, '0') + ' · ' : '';
+  // Mockup row-sub: the transport and the carrier, in the words the config uses.
+  const transportLine = [inst.transport, inst.carrier].filter(Boolean).join(', ');
+  const sub = el('div', 'row-sub', groupTag + '#' + inst.id + ' · ' + (transportLine || inst.label || ''));
+  if (inst.name && inst.name !== displayName) sub.title = 'Имя в конфигурации: ' + inst.name;
+  idBox.appendChild(sub);
+  // Wbstream cannot come up without a room and cannot connect with an expired
+  // token. The mockup has no badge slot, so the reason sits on the row itself.
+  if (inst.carrier === 'wbstream' && (!inst.room_id || inst.room_id === 'any')) {
+    const warn = el('div', 'row-sub nok', 'нужен Room ID');
+    warn.title = 'wbstream больше не создаёт румы автоматически: задайте Room ID в настройках инстанса';
+    idBox.appendChild(warn);
+  }
+  if (inst.carrier === 'wbstream' && inst.auth_token_expired) {
+    const warn = el('div', 'row-sub nok', 'токен истёк');
+    warn.title = inst.auth_token_expires_at
+      ? 'Истёк ' + new Date(inst.auth_token_expires_at * 1000).toLocaleString()
+      : 'Обновите общий WB-токен в Настройках';
+    idBox.appendChild(warn);
+  }
+  row.appendChild(idBox);
 
-  // Actions
-  const actions = el('div', 'vl-acts');
-  const uriBtn = el('button', 'btn btn-secondary btn-sm');
+  const chan = el('div', 'chan');
+  const state = fmtInstanceState(inst, agg);
+  const stateEl = el('div', 'state ' + state.cls);
+  stateEl.appendChild(document.createTextNode(state.word + (state.why ? ' ' : '')));
+  if (state.why) stateEl.appendChild(el('span', 'state-note', state.why));
+  chan.appendChild(stateEl);
+  if (agg.runs.length) {
+    const rail = el('i', 'rail');
+    rail.setAttribute('style', 'background-image: ' + fmtRailGradient(agg));
+    rail.setAttribute('aria-label', 'история канала за час, минута на деление');
+    chan.appendChild(rail);
+    const labels = el('div', 'rail-label');
+    labels.appendChild(el('span', '', '−60 мин'));
+    if (!agg.complete) labels.appendChild(el('span', '', 'данных пока меньше часа'));
+    labels.appendChild(el('span', '', 'сейчас'));
+    chan.appendChild(labels);
+  } else {
+    chan.appendChild(el('div', 'rail-empty', 'истории пока нет, рейка начнётся с первой минуты'));
+  }
+  row.appendChild(chan);
+
+  const metric = el('div', 'row-metric');
+  const peersNode = el('b', 'num');
+  peersNode.dataset.instanceUsage = String(inst.id);
+  setUsageBadge(peersNode, inst);
+  metric.appendChild(peersNode);
+  metric.appendChild(document.createTextNode(' ' + peersWord(Number(inst.active_peers) || 0)));
+  if (inst.uptime) {
+    metric.appendChild(document.createElement('br'));
+    metric.appendChild(el('span', 'nok num', inst.uptime));
+  }
+  row.appendChild(metric);
+
+  const actions = el('div', 'row-actions');
+  const uriBtn = el('button', 'btn btn-ghost btn-sm');
   uriBtn.setAttribute('aria-label', 'Копировать URI');
-  uriBtn.innerHTML = icon('copy') + '<span>URI</span>';
+  uriBtn.textContent = 'URI';
   uriBtn.onclick = () => {
     navigator.clipboard.writeText(displayURI);
     showToast('URI скопирован');
   };
-  const qrBtn = el('button', 'btn btn-secondary btn-sm');
+  const qrBtn = el('button', 'btn btn-ghost btn-sm');
   qrBtn.setAttribute('aria-label', 'Показать QR-код');
-  qrBtn.innerHTML = icon('qr-code') + '<span>QR</span>';
+  qrBtn.textContent = 'QR';
   qrBtn.onclick = async () => {
     await withLoading(qrBtn, async () => {
       try {
@@ -1077,9 +1072,9 @@ function renderInstanceCard(inst, context = {}) {
       }
     });
   };
-  const pingBtn = el('button', 'btn btn-secondary btn-sm');
+  const pingBtn = el('button', 'btn btn-ghost btn-sm');
   pingBtn.setAttribute('aria-label', 'Проверить соединение');
-  pingBtn.innerHTML = icon('wifi') + '<span>Пинг</span>';
+  pingBtn.textContent = 'Пинг';
   pingBtn.onclick = async () => {
     await withLoading(pingBtn, async () => {
       try {
@@ -1101,12 +1096,16 @@ function renderInstanceCard(inst, context = {}) {
       }
     });
   };
-  const cfgBtn = el('button', 'btn btn-secondary btn-sm');
+  const cfgBtn = el('button', 'btn btn-ghost btn-sm');
   cfgBtn.setAttribute('aria-label', 'Настройки инстанса');
-  cfgBtn.innerHTML = icon('sliders') + '<span>Настройки</span>';
+  cfgBtn.textContent = 'Конфиг';
+  // The carrier's setup hint is knowledge worth keeping (which cookies a carrier
+  // needs, what its room has to be). The row has no place for it, so it rides on
+  // the button that opens the settings.
+  cfgBtn.title = fmtTransportInfo(inst).hint || 'Настройки инстанса';
   cfgBtn.onclick = () => showConfigModal(inst);
   const isRunning = inst.status === 'running';
-  const startStopBtn = el('button', isRunning ? 'btn btn-secondary btn-sm btn-icon' : 'btn btn-success btn-sm btn-icon');
+  const startStopBtn = el('button', isRunning ? 'btn btn-ghost btn-sm btn-icon' : 'btn btn-primary btn-sm btn-icon');
   startStopBtn.setAttribute('aria-label', isRunning ? 'Остановить' : 'Запустить');
   startStopBtn.title = isRunning ? 'Остановить' : 'Запустить';
   startStopBtn.innerHTML = isRunning ? icon('stop') : icon('play');
@@ -1121,7 +1120,7 @@ function renderInstanceCard(inst, context = {}) {
       } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
     });
   };
-  const restartBtn = el('button', 'btn btn-secondary btn-sm btn-icon');
+  const restartBtn = el('button', 'btn btn-ghost btn-sm btn-icon');
   restartBtn.setAttribute('aria-label', 'Перезапустить');
   restartBtn.title = 'Перезапустить';
   restartBtn.innerHTML = icon('refresh-cw');
@@ -1168,7 +1167,6 @@ function renderInstanceCard(inst, context = {}) {
     actions.appendChild(delBtn);
   }
   row.appendChild(actions);
-  row.appendChild(renderInstanceService(inst, { ...context, displayName }));
   return row;
 }
 
