@@ -45,10 +45,30 @@ func TestPublicSubServesBundleFromEmbeddedBackend(t *testing.T) {
 	}
 }
 
+// The embedded server binds the subscription port by default: the live unit
+// already passes -sub-port and Caddy already proxies /sub/* there, so the
+// public path survives a restart without another knob.
+func TestSubscriptionBackendDefaultsToSubPort(t *testing.T) {
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, "env")
+	if err := os.WriteFile(envPath, []byte("OLCRTC_SUB_ENABLED=true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b := newAdminSubscriptionBackend(Config{ConfigDir: dir, SubPort: 2097})
+	if cfg := b.readConfig(); cfg.listen != "127.0.0.1:2097" {
+		t.Fatalf("listen = %q, want 127.0.0.1:2097", cfg.listen)
+	}
+	if err := os.WriteFile(envPath, []byte("OLCRTC_SUB_ENABLED=true\nOLCRTC_SUB_LISTEN=127.0.0.1:4097\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if cfg := b.readConfig(); cfg.listen != "127.0.0.1:4097" {
+		t.Fatalf("explicit listen = %q, want 127.0.0.1:4097", cfg.listen)
+	}
+}
+
 // A configured listen address is bound as is: Caddy points /sub/* at that exact
 // address, so an ephemeral port would break the public path on every restart.
-func TestSubscriptionBackendKeepsConfiguredAddress(t *testing.T) {
-	probe, err := net.Listen("tcp", "127.0.0.1:0")
+func TestSubscriptionBackendKeepsConfiguredAddress(t *testing.T) {	probe, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -26,11 +26,12 @@ type adminSubscriptionBackend struct {
 }
 
 type adminSubscriptionConfig struct {
-	enabled  bool
-	dbPath   string
-	apiToken string
-	listen   string
-	mirror   *mirror.Manager
+	enabled     bool
+	dbPath      string
+	apiToken    string
+	listen      string
+	mirrorProxy string
+	mirror      *mirror.Manager
 }
 
 // listenSubscriptionBackend binds the embedded subscription server. A
@@ -68,6 +69,9 @@ func (b *adminSubscriptionBackend) start(ctx context.Context) error {
 	b.mu.Unlock()
 	if !cfg.enabled {
 		return nil
+	}
+	if cfg.mirror != nil && cfg.mirror.Enabled() && cfg.mirrorProxy == "" {
+		logger.Warnf("subscription mirror is on but OLCRTC_SUB_MIRROR_PROXY is empty: uploads to cloud-api.yandex.net go out over the direct egress, which is blocked here, and will time out. Set OLCRTC_SUB_MIRROR_PROXY=127.0.0.1:40000")
 	}
 
 	st, err := store.Open(cfg.dbPath)
@@ -139,14 +143,21 @@ func (b *adminSubscriptionBackend) readConfig() adminSubscriptionConfig {
 	}
 	mEnabled, mProvider, mToken, mBase := ReadMirrorConfig(b.cfg.ConfigDir)
 	mProxy := ReadMirrorProxy(b.cfg.ConfigDir)
-	if mEnabled && mProxy == "" {
-		logger.Warnf("subscription mirror is on but OLCRTC_SUB_MIRROR_PROXY is empty: uploads to cloud-api.yandex.net go out over the direct egress, which is blocked here, and will time out. Set OLCRTC_SUB_MIRROR_PROXY=127.0.0.1:40000")
+	// The embedded server answers the public /sub path, and Caddy is pointed at
+	// the subscription port (-sub-port / OLCRTC_SUB_PORT). Binding that port by
+	// default is what makes the path survive a restart; OLCRTC_SUB_LISTEN
+	// overrides it, and an address that is already taken falls back to the old
+	// ephemeral port with an error in the log.
+	listen := strings.TrimSpace(vals["OLCRTC_SUB_LISTEN"])
+	if listen == "" && b.cfg.SubPort > 0 {
+		listen = fmt.Sprintf("127.0.0.1:%d", b.cfg.SubPort)
 	}
 	return adminSubscriptionConfig{
-		enabled:  enabled,
-		dbPath:   dbPath,
-		apiToken: strings.TrimSpace(vals["OLCRTC_SUB_API_TOKEN"]),
-		listen:   strings.TrimSpace(vals["OLCRTC_SUB_LISTEN"]),
+		enabled:     enabled,
+		dbPath:      dbPath,
+		apiToken:    strings.TrimSpace(vals["OLCRTC_SUB_API_TOKEN"]),
+		listen:      listen,
+		mirrorProxy: mProxy,
 		mirror: mirror.New(mirror.Config{
 			Enabled:    mEnabled,
 			Provider:   mProvider,

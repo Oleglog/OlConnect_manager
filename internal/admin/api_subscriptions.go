@@ -172,8 +172,8 @@ func (s *Server) refreshLinkedSubscriptionInstance(id int, uri string) error {
 		message, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("subscription refresh status %d: %s", resp.StatusCode, strings.TrimSpace(string(message)))
 	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	warnMirrorErrors("refresh-linked", body)
+	reply, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	warnMirrorErrors("refresh-linked", reply)
 	return nil
 }
 
