@@ -299,7 +299,14 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := staticFS.ReadFile("static" + path)
 	if err != nil {
-		// Fallback to index.html for SPA routing.
+		// Fallback to index.html for SPA routing, but only for a route: a missing
+		// asset has to answer 404. Serving index.html for a lost stylesheet or
+		// font hides the mistake, because the browser gets HTML with a 200 and
+		// silently drops the file.
+		if ext := strings.TrimPrefix(filepath.Ext(path), "."); ext != "" && ext != "html" {
+			http.Error(w, "Not Found", http.StatusNotFound)
+			return
+		}
 		data, err = staticFS.ReadFile("static/index.html")
 		if err != nil {
 			http.Error(w, "Not Found", http.StatusNotFound)
