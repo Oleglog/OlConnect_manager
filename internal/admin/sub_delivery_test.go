@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -124,5 +123,4 @@ func TestParseMirrorErrors(t *testing.T) {
 	if errs := parseMirrorErrors([]byte("not json")); errs != nil {
 		t.Fatalf("garbage body should give nil, got %v", errs)
 	}
-	_ = json.Marshal(errs)
 }
