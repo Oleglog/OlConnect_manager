@@ -145,8 +145,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .row:last-child { border-bottom: 0; }
 .row:hover { background: var(--surface-raised); }
 .row-id { font-weight: 700; font-size: var(--fs-14); }
+a.row-id { color: inherit; text-decoration: none; }
+a.row-id:hover { text-decoration: underline; text-underline-offset: 2px; }
 .row-sub { color: var(--ink-faint); font-size: var(--fs-12); margin-top: 2px; }
 .chan { display: flex; flex-direction: column; gap: var(--s-1); min-width: 0; }
+.chan.is-link { cursor: pointer; }
+.chan.is-link:hover .rail { opacity: 0.85; }
 .chan .rail { height: 10px; }
 .row-metric { font-size: var(--fs-12); color: var(--ink-muted); line-height: 1.35; }
 .row-metric b { color: var(--ink); font-weight: 600; }

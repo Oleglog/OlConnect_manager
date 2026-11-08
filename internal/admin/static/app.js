@@ -317,12 +317,13 @@ function render() {
   if (path === '/login') {
     renderLogin(app);
   } else {
-    // /instances/new and /instances/<id> are pages of their own; everything else
-    // is a section.
+    // /instances/new was a page for one release; old links land on the list, where
+    // "Добавить" opens the modal again.
     if (path === '/instances/new') {
-      renderInstanceCreatePage(app);
+      route('/instances');
       return;
     }
+    // /instances/<id> is the channel card; everything else is a section.
     const instanceMatch = path.match(/^\/instances\/(\d+)$/);
     if (instanceMatch) {
       renderInstancePage(app, Number(instanceMatch[1]));
@@ -605,7 +606,7 @@ function renderInstancesHead(instances, memberships) {
   return {
     title: 'Инстансы',
     sub,
-    action: makePrimaryButton('Добавить', () => route('/instances/new')),
+    action: makePrimaryButton('Добавить', () => showCreateInstanceModal()),
   };
 }
 
@@ -1038,138 +1039,6 @@ function peersWord(count) {
 // The create screen as a route, transplanted from ofx-design/admin-instance-new.html:
 // the same head, the carrier tiles, the panels and the footer. The fields are the
 // modal's own builder, so nothing can drift and the modal keeps working.
-const CARRIER_TITLES = {
-  jitsi: 'Jitsi',
-  telemost: 'Telemost',
-  wbstream: 'WB Stream',
-  openflux: 'OpenFlux',
-};
-
-async function renderInstanceCreatePage(app) {
-  const frame = renderShell('instances');
-  const form = buildCreateInstanceForm();
-
-  const head = el('div', 'head');
-  const left = el('div', '');
-  const backBtn = el('button', 'btn btn-ghost btn-sm');
-  backBtn.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg>Все инстансы';
-  backBtn.style.marginBottom = 'var(--s-2)';
-  backBtn.onclick = () => route('/instances');
-  left.appendChild(backBtn);
-  left.appendChild(el('h1', '', 'Новый инстанс'));
-  left.appendChild(el('p', 'sub', 'Один инстанс, один канал через чужую инфраструктуру'));
-  head.appendChild(left);
-  frame.main.appendChild(head);
-
-  const body = el('div', 'body');
-  body.style.maxWidth = '760px';
-
-  // Panel 1: the carriers as tiles, as the mockup draws them.
-  const carrierPanel = el('section', 'panel');
-  const carrierHead = el('div', 'panel-head');
-  carrierHead.appendChild(el('h2', '', 'Носитель'));
-  carrierHead.appendChild(el('span', 'hint', 'определяет, какой транспорт поднимется'));
-  carrierPanel.appendChild(carrierHead);
-  const pickWrap = el('div', '');
-  pickWrap.style.padding = 'var(--s-4)';
-  const pick = el('div', 'pick');
-  pick.setAttribute('role', 'group');
-  pick.setAttribute('aria-label', 'Носитель');
-  const tiles = new Map();
-  form.carrierOptions.forEach(carrier => {
-    const tile = el('button');
-    tile.type = 'button';
-    tile.appendChild(el('b', '', CARRIER_TITLES[carrier] || carrier));
-    tile.appendChild(el('span', '', carrier));
-    tile.setAttribute('aria-pressed', 'false');
-    tile.onclick = () => {
-      form.setCarrier(carrier);
-      syncTiles();
-      syncFacts();
-    };
-    tiles.set(carrier, tile);
-    pick.appendChild(tile);
-  });
-  function syncTiles() {
-    const current = form.describe().carrier;
-    tiles.forEach((tile, carrier) => {
-      tile.setAttribute('aria-pressed', carrier === current ? 'true' : 'false');
-    });
-  }
-  pickWrap.appendChild(pick);
-  carrierPanel.appendChild(pickWrap);
-  body.appendChild(carrierPanel);
-
-  // Panel 2: the form itself. Same node the modal mounts.
-  const formPanel = el('section', 'panel');
-  const formHead = el('div', 'panel-head');
-  formHead.appendChild(el('h2', '', 'Подключение'));
-  formPanel.appendChild(formHead);
-  const formWrap = el('div', '');
-  formWrap.style.padding = 'var(--s-4)';
-  formWrap.appendChild(form.node);
-  formPanel.appendChild(formWrap);
-  body.appendChild(formPanel);
-
-  // Panel 3: what will appear, as far as it is knowable before the id exists.
-  const summaryPanel = el('section', 'panel');
-  const summaryHead = el('div', 'panel-head');
-  summaryHead.appendChild(el('h2', '', 'Что появится'));
-  summaryPanel.appendChild(summaryHead);
-  const summaryFacts = el('div', 'facts');
-  const carrierFact = el('div', '');
-  carrierFact.appendChild(el('div', 'fact-k', 'Носитель'));
-  const carrierValue = el('div', 'fact-v num');
-  carrierFact.appendChild(carrierValue);
-  const transportFact = el('div', '');
-  transportFact.appendChild(el('div', 'fact-k', 'Транспорт'));
-  const transportValue = el('div', 'fact-v num');
-  transportFact.appendChild(transportValue);
-  const nameFact = el('div', '');
-  nameFact.appendChild(el('div', 'fact-k', 'Имя в панели'));
-  const nameValue = el('div', 'fact-v num');
-  nameFact.appendChild(nameValue);
-  summaryFacts.appendChild(carrierFact);
-  summaryFacts.appendChild(transportFact);
-  summaryFacts.appendChild(nameFact);
-  summaryPanel.appendChild(summaryFacts);
-
-  function syncFacts() {
-    const d = form.describe();
-    carrierValue.textContent = CARRIER_TITLES[d.carrier] || d.carrier || '-';
-    transportValue.textContent = d.transport || '-';
-    nameValue.textContent = d.name || '-';
-  }
-
-  const footer = el('div', '');
-  footer.style.display = 'flex';
-  footer.style.justifyContent = 'flex-end';
-  footer.style.gap = 'var(--s-2)';
-  footer.style.padding = 'var(--s-4)';
-  footer.style.borderTop = '1px solid var(--line)';
-  const cancelBtn = el('button', 'btn btn-ghost', 'Отмена');
-  cancelBtn.onclick = () => route('/instances');
-  const createBtn = el('button', 'btn btn-primary', 'Создать инстанс');
-  createBtn.onclick = async () => {
-    if (await form.submit(createBtn)) route('/instances');
-  };
-  footer.appendChild(cancelBtn);
-  footer.appendChild(createBtn);
-  summaryPanel.appendChild(footer);
-
-  body.appendChild(summaryPanel);
-  frame.main.appendChild(body);
-
-  // Carrier, transport and name change under the tiles and the facts, so the
-  // summary follows the form without polling.
-  form.node.addEventListener('change', () => { syncTiles(); syncFacts(); });
-  form.node.addEventListener('input', () => { syncFacts(); });
-  syncTiles();
-  syncFacts();
-
-  app.appendChild(frame.shell);
-}
-
 function renderInstanceCard(inst, context = {}) {
   const row = el('div', 'row');
   const displayName = (inst.carrier === 'openflux' && inst.name) ? inst.name : (context.displayName || inst.name || inst.label);
@@ -1177,7 +1046,13 @@ function renderInstanceCard(inst, context = {}) {
   const agg = fmtInstanceHistory(inst);
 
   const idBox = el('div', '');
-  idBox.appendChild(el('div', 'row-id', displayName));
+  // The name is the way into the channel card: a real link, so it is focusable and
+  // middle-clickable, routed inside the SPA.
+  const nameLink = el('a', 'row-id', displayName);
+  nameLink.href = '/instances/' + inst.id;
+  nameLink.title = 'Открыть карточку канала';
+  nameLink.onclick = (e) => { e.preventDefault(); route('/instances/' + inst.id); };
+  idBox.appendChild(nameLink);
   const groupTag = context.groupNumber ? String(context.groupNumber).padStart(2, '0') + ' · ' : '';
   // Mockup row-sub: the transport and the carrier, in the words the config uses.
   const transportLine = [inst.transport, inst.carrier].filter(Boolean).join(', ');
@@ -1200,7 +1075,11 @@ function renderInstanceCard(inst, context = {}) {
   }
   row.appendChild(idBox);
 
-  const chan = el('div', 'chan');
+  const chan = el('div', 'chan is-link');
+  // The channel cell is the other way in: clicking the state or the hour opens the
+  // card. Keyboard users have the name link above, so this stays a shortcut.
+  chan.title = 'Открыть карточку канала';
+  chan.onclick = () => route('/instances/' + inst.id);
   const state = fmtInstanceState(inst, agg);
   const stateEl = el('div', 'state ' + state.cls);
   stateEl.appendChild(document.createTextNode(state.word + (state.why ? ' ' : '')));
@@ -1295,11 +1174,10 @@ function renderInstanceCard(inst, context = {}) {
   const cfgBtn = el('button', 'btn btn-ghost btn-sm');
   cfgBtn.setAttribute('aria-label', 'Настройки инстанса');
   cfgBtn.textContent = 'Конфиг';
-  // The mockup names "Конфиг" the place where secondary things live, and the card
-  // is that place now: the row links to it. The carrier's setup hint (which
-  // cookies a carrier needs, what its room has to be) rides along as the tooltip.
-  cfgBtn.title = fmtTransportInfo(inst).hint || 'Карточка инстанса';
-  cfgBtn.onclick = () => route('/instances/' + inst.id);
+  // One click to the form, as before: the owner asked for the modal back. The
+  // card stays reachable through the name and the channel cell, not through here.
+  cfgBtn.title = fmtTransportInfo(inst).hint || 'Настройки инстанса';
+  cfgBtn.onclick = () => showConfigModal(inst);
   const isRunning = inst.status === 'running';
   const startStopBtn = el('button', isRunning ? 'btn btn-ghost btn-sm btn-icon' : 'btn btn-primary btn-sm btn-icon');
   startStopBtn.setAttribute('aria-label', isRunning ? 'Остановить' : 'Запустить');
@@ -3384,24 +3262,9 @@ function buildCreateInstanceForm() {
     return created;
   }
 
-  // What the chosen combination will produce, as far as it is knowable before the
-  // server assigns an id: carrier, transport and the name that will be stored.
-  function describe() {
-    return {
-      carrier: carrierField.input.value,
-      transport: transportField.input.value,
-      name: nameField.input.value,
-    };
-  }
-
-  // The page shows the carriers as tiles, the modal as a select. Both drive the
-  // same field, so there is one source of truth for the choice.
-  function setCarrier(value) {
-    carrierField.input.value = value;
-    carrierField.input.dispatchEvent(new Event('change'));
-  }
-
-  return { node: div, submit, describe, setCarrier, carrierOptions: ['jitsi', 'telemost', 'wbstream', 'openflux'] };
+  // Only the node and the submit: the modal is the one frame that mounts this
+  // form now, so no describe/setCarrier plumbing is left behind.
+  return { node: div, submit };
 }
 
 function showCreateInstanceModal() {
