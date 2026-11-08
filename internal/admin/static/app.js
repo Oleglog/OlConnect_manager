@@ -7,8 +7,6 @@ let creds = JSON.parse(localStorage.getItem('olcrtc_creds') || 'null'); // {user
 let loginNotice = ''; // one-shot message shown on the login screen
 let usagePollTimer = null;
 const latestInstanceUsage = new Map();
-// Version shown in the sidebar footer, from the last /system/status response.
-let panelVersion = '';
 
 const JITSI_PRESETS = [
   { host: 'meet.jit.si', label: 'meet.jit.si', preferred: true, note: 'official, baseline' },
@@ -181,8 +179,20 @@ function randHex(bytes = 32) {
   return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Status wording lives in fmtInstanceState now: the card shows a Russian word
-// plus the hour of history, not a dot and a pill saying the same thing twice.
+function fmtStatusDot(st) {
+  const map = { running: 'status-running', active: 'status-running', failed: 'status-failed' };
+  return map[st] || 'status-inactive';
+}
+
+function fmtStatusPill(st) {
+  if (st === 'running' || st === 'active') return { cls: 'status-pill-running', label: 'running' };
+  if (st === 'failed') return { cls: 'status-pill-failed', label: 'failed' };
+  if (st === 'unknown') return { cls: 'status-pill-inactive', label: 'unknown' };
+  return { cls: 'status-pill-inactive', label: st || 'inactive' };
+}
+
+// Human-readable transport label + room-setup hint for instance cards.
+// inst.transport is the raw OLCRTC_TRANSPORT value; inst.room_id is the doc URL.
 function fmtTransportInfo(inst) {
   const t = (inst.transport || '').toLowerCase();
   const room = inst.room_id || '';
@@ -317,18 +327,6 @@ function render() {
   if (path === '/login') {
     renderLogin(app);
   } else {
-    // /instances/new was a page for one release; old links land on the list, where
-    // "Добавить" opens the modal again.
-    if (path === '/instances/new') {
-      route('/instances');
-      return;
-    }
-    // /instances/<id> is the channel card; everything else is a section.
-    const instanceMatch = path.match(/^\/instances\/(\d+)$/);
-    if (instanceMatch) {
-      renderInstancePage(app, Number(instanceMatch[1]));
-      return;
-    }
     // Default '/' opens System; deeper sections are separate viewed blocks.
     const section = path === '/' ? 'system' : path.replace(/^\//, '') || 'system';
     if (section === 'settings') {
@@ -340,12 +338,7 @@ function render() {
 }
 window.addEventListener('popstate', render);
 
-// Shared layout, transplanted from the approved mockup (ofx-design/admin-instances.html):
-// .shell > aside.side (brand + nav + nav-foot) and main.main. The sidebar's own
-// classes, the old app-shell grid and its link styles are gone; the frame now
-// comes from base.css, the mockup's own stylesheet.
-const BRAND_MARK = '<svg class="brand-mark" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>';
-
+// Shared layout: vertical sidebar (horizontal tabs on narrow screens) + content.
 function renderShell(activeSection) {
   const sections = [
     { id: 'system', label: 'Система', icon: 'shield' },
@@ -354,39 +347,31 @@ function renderShell(activeSection) {
     { id: 'settings', label: 'Настройки', icon: 'settings' },
   ];
 
-  const shell = el('div', 'shell');
+  const shell = el('div', 'app-shell');
+  const sidebar = el('nav', 'sidebar');
 
-  const side = el('aside', 'side');
-  const brand = el('div', 'brand');
-  brand.innerHTML = BRAND_MARK + '<span class="brand-name">olcRTC<span class="brand-tail"> panel</span></span>';
-  side.appendChild(brand);
+  const brand = el('div', 'sidebar-brand');
+  brand.innerHTML = renderBrandLogo(26);
+  sidebar.appendChild(brand);
 
-  const nav = el('nav', 'nav');
-  nav.setAttribute('aria-label', 'Разделы');
   sections.forEach((s) => {
-    const item = el('button', 'nav-item');
-    if (s.id === activeSection) item.setAttribute('aria-current', 'true');
-    item.innerHTML = icon(s.icon, 16) + s.label;
-    item.setAttribute('aria-label', s.label);
-    item.onclick = () => route('/' + s.id);
-    nav.appendChild(item);
+    const link = el('button', 'sidebar-link' + (s.id === activeSection ? ' sidebar-link-active' : ''));
+    link.innerHTML = icon(s.icon, 16) + '<span>' + s.label + '</span>';
+    link.setAttribute('aria-label', s.label);
+    link.onclick = () => route('/' + s.id);
+    sidebar.appendChild(link);
   });
-  side.appendChild(nav);
 
-  // The mockup's nav-foot carries the version; the logout control the panel needs
-  // and the mockup does not show sits there too, in the same class.
-  const foot = el('div', 'nav-foot');
-  const versionLine = el('div', '', 'Версия ' + (panelVersion || '—'));
-  foot.appendChild(versionLine);
-  const logoutBtn = el('button', 'nav-item');
-  logoutBtn.innerHTML = icon('log-out', 16) + 'Выход';
+  const footer = el('div', 'sidebar-footer');
+  const logoutBtn = el('button', 'sidebar-link');
   logoutBtn.setAttribute('aria-label', 'Выход');
+  logoutBtn.innerHTML = icon('log-out') + '<span>Выход</span>';
   logoutBtn.onclick = () => { creds = null; localStorage.removeItem('olcrtc_creds'); route('/login'); };
-  foot.appendChild(logoutBtn);
-  side.appendChild(foot);
+  footer.appendChild(logoutBtn);
+  sidebar.appendChild(footer);
 
-  const main = el('main', 'main');
-  shell.appendChild(side);
+  const main = el('main', 'sidebar-main');
+  shell.appendChild(sidebar);
   shell.appendChild(main);
   return { shell, main };
 }
@@ -493,165 +478,107 @@ async function renderDashboard(app, section) {
     }
   }
 
-  panelVersion = sys.version || '';
-  let headParts;
+  const wrap = el('div', 'max-w-6xl mx-auto');
   if (section === 'instances') {
-    headParts = renderInstancesHead(instances, instanceMemberships);
+    wrap.appendChild(renderInstancesBlock(instances, instanceMemberships));
   } else if (section === 'subscriptions') {
-    headParts = renderSubscriptionsHead(subs, subsError);
+    wrap.appendChild(renderSubscriptionsBlock(subs, subsError, instances, sys));
   } else {
-    headParts = { title: SECTION_TITLES[section] || '', sub: '', action: null };
+    wrap.appendChild(renderSystemBlock(sys));
   }
-  main.appendChild(renderPageHead(section, headParts));
-
-  const bodyEl = el('div', 'body');
-  if (section === 'instances') {
-    renderInstancesBlock(bodyEl, instances, instanceMemberships);
-  } else if (section === 'subscriptions') {
-    renderSubscriptionsBlock(bodyEl, subs, subsError, instances, sys, instanceMemberships);
-  } else {
-    bodyEl.appendChild(renderSystemBlock(sys));
-  }
-  main.appendChild(bodyEl);
+  main.appendChild(wrap);
 
   app.appendChild(frame.shell);
   startUsagePolling();
 }
 
-const SECTION_TITLES = {
-  system: 'Система',
-  instances: 'Инстансы',
-  subscriptions: 'Подписки',
-  settings: 'Настройки',
-};
-
-// .head exactly as the mockup has it: h1, a one-line sub, and the screen's one
-// primary action on the right.
-function renderPageHead(section, parts) {
-  const head = el('div', 'head');
-  const left = el('div', '');
-  left.appendChild(el('h1', '', parts.title));
-  if (parts.sub) left.appendChild(el('p', 'sub', parts.sub));
-  head.appendChild(left);
-  if (parts.action) head.appendChild(parts.action);
-  return head;
-}
-
-function makePrimaryButton(label, onClick) {
-  const btn = el('button', 'btn btn-primary');
-  btn.innerHTML = icon('plus') + label;
-  btn.onclick = onClick;
-  return btn;
-}
-
 function renderSystemBlock(sys) {
-  // Same vocabulary as every other screen: one panel, its facts in facts/fact-k/
-  // fact-v. No second stylesheet, no icon slab, no badge.
-  const panel = el('section', 'panel');
+  const container = el('div', 'flex flex-col gap-4');
 
-  const head = el('div', 'panel-head');
-  head.appendChild(el('h2', '', 'Сервер olcRTC'));
-  const hintBits = ['онлайн'];
-  if (sys.version) hintBits.push('версия ' + sys.version);
-  if (sys.os) hintBits.push(sys.os);
-  head.appendChild(el('span', 'hint', hintBits.join(', ')));
-  panel.appendChild(head);
+  const banner = el('div', 'card p-5 flex flex-wrap items-center justify-between gap-4');
+  banner.innerHTML = `
+    <div class="flex items-center gap-3.5">
+      <div class="w-11 h-11 rounded-lg flex items-center justify-center flex-shrink-0" style="background:var(--color-lavender-subtle);color:var(--color-primary);border:1px solid var(--color-lavender-border);">
+        ${icon('shield', 24)}
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h2 class="text-base font-bold" style="color:var(--color-ink);">Сервер OlCRTC</h2>
+          <span class="badge badge-emerald">онлайн</span>
+        </div>
+        <div class="text-xs mt-0.5" style="color:var(--color-ink-subtle);">Версия <span class="font-mono">${sys.version || '-'}</span> · ОС: ${sys.os || '-'}</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-4">
+      <div class="text-right">
+        <div class="text-xs uppercase tracking-wider font-semibold" style="color:var(--color-ink-subtle);">Аптайм</div>
+        <div class="text-sm font-semibold" style="color:var(--color-ink);">${sys.uptime || '-'}</div>
+      </div>
+    </div>
+  `;
+  container.appendChild(banner);
 
+  const grid = el('div', 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3');
   const items = [
-    { label: 'Аптайм', val: sys.uptime || '-', mono: true },
-    { label: 'Активные пиры', val: String(Number(sys.active_peers) || 0), id: 'active-peer-count', mono: true },
+    { label: 'Активные пиры', val: String(Number(sys.active_peers) || 0), id: 'active-peer-count', highlight: true },
     { label: 'Инстансы', val: (sys.instances_running || 0) + ' / ' + (sys.instances_total || 0) },
-    { label: 'Публичный IP', val: sys.public_ip || '-', copy: true, mono: true },
+    { label: 'Публичный IP', val: sys.public_ip || '-', copy: true },
     { label: 'TLS / Домен', val: (sys.tls_mode || '-') + (sys.domain ? ' (' + sys.domain + ')' : '') },
-    { label: 'Порт админки', val: sys.admin_port || '-', mono: true },
+    { label: 'Порт админки', val: sys.admin_port || '-' },
     { label: 'Подписки', val: sys.sub_enabled ? (sys.sub_running ? 'Включены' : 'Сбой') : 'Выключены' },
   ];
 
-  const facts = el('div', 'facts');
   items.forEach(it => {
-    const cell = el('div', '');
-    cell.appendChild(el('div', 'fact-k', it.label));
-    const cls = 'fact-v' + (it.mono ? ' num' : '') + (it.copy ? ' copyable' : '');
-    const val = el('div', cls);
+    const tile = el('div', 'metric-card flex flex-col justify-between');
+    const lbl = el('div', 'text-xs uppercase tracking-wider mb-1 font-semibold');
+    lbl.style.color = 'var(--color-ink-subtle)';
+    lbl.textContent = it.label;
+
+    const val = el('div', 'text-sm font-semibold truncate' + (it.copy ? ' copyable' : ''));
+    val.style.color = it.highlight ? 'var(--color-primary)' : 'var(--color-ink)';
     if (it.id) val.id = it.id;
     val.textContent = it.val;
-    cell.appendChild(val);
-    facts.appendChild(cell);
+
+    tile.appendChild(lbl);
+    tile.appendChild(val);
+    grid.appendChild(tile);
   });
-  panel.appendChild(facts);
 
-  return panel;
-}
-
-function renderInstancesHead(instances, memberships) {
-  const total = instances.length;
-  const running = instances.filter(i => i.status === 'running' || i.status === 'active').length;
-  const stopped = total - running;
-  let flapping = 0;
-  let limited = 0;
-  instances.forEach(inst => {
-    const state = fmtInstanceState(inst, fmtInstanceHistory(inst));
-    if (state.cls === 's-degraded') flapping += 1;
-    else if (state.cls === 's-warn') limited += 1;
-  });
-  const parts = [total + ' ' + pluralInstances(total) + ':'];
-  const counts = [];
-  if (running) counts.push(running + ' активны');
-  if (stopped) counts.push(stopped + ' остановлены');
-  let sub = parts.concat(counts.join(', ')).join(' ');
-  const channel = [];
-  if (flapping) channel.push(flapping + ' рвётся');
-  if (limited) channel.push(limited + ' на пределе');
-  if (channel.length) sub += '. По каналу: ' + channel.join(', ');
-  return {
-    title: 'Инстансы',
-    sub,
-    action: makePrimaryButton('Добавить', () => showCreateInstanceModal()),
-  };
-}
-
-// One panel per group, exactly the mockup's panel > panel-head > rows shape.
-function renderInstancesBlock(container, instances, instanceMemberships) {
-  if (instances.length === 0) {
-    const panel = el('section', 'panel');
-    const head = el('div', 'panel-head');
-    head.appendChild(el('h2', '', 'Инстансов нет'));
-    panel.appendChild(head);
-    const facts = el('div', 'facts');
-    facts.appendChild(el('div', 'fact-v', 'Создайте первый инстанс кнопкой «Добавить» в шапке.'));
-    panel.appendChild(facts);
-    container.appendChild(panel);
-    return container;
-  }
-  container.appendChild(renderInstanceGroups(instances, instanceMemberships));
+  container.appendChild(grid);
   return container;
 }
 
-function pluralSubscriptions(count) {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) return 'подписка';
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'подписки';
-  return 'подписок';
+function renderInstancesBlock(instances, instanceMemberships) {
+  const instSection = el('div', 'mb-8');
+  const instHeader = el('div', 'flex items-center justify-between mb-4');
+  instHeader.innerHTML = '<h2 class="text-lg font-semibold">Инстансы</h2>';
+  const addInstBtn = el('button', 'btn btn-primary btn-sm');
+  addInstBtn.setAttribute('aria-label', 'Создать инстанс');
+  addInstBtn.innerHTML = icon('plus') + '<span>Создать инстанс</span>';
+  addInstBtn.onclick = () => showCreateInstanceModal();
+  instHeader.appendChild(addInstBtn);
+  instSection.appendChild(instHeader);
+
+  if (instances.length === 0) {
+    const empty = el('div', 'card p-6 text-center text-gray-400 text-sm');
+    empty.textContent = 'Инстансов нет. Создайте первый кнопкой выше.';
+    instSection.appendChild(empty);
+  } else {
+    instSection.appendChild(renderInstanceGroups(instances, instanceMemberships));
+  }
+  return instSection;
 }
 
-// .head of the subscriptions screen: what exists and the one primary action, with
-// export and import as secondary controls beside it.
-function renderSubscriptionsHead(subs, subsError) {
-  const list = Array.isArray(subs) ? subs : [];
-  let sub = '';
-  if (subsError) {
-    sub = 'сервис подписок недоступен';
-  } else if (list.length === 0) {
-    sub = 'подписок пока нет';
-  } else {
-    sub = list.length + ' ' + pluralSubscriptions(list.length);
-  }
-  const actions = el('div', '');
-  actions.style.display = 'flex';
-  actions.style.gap = 'var(--s-2)';
-  actions.style.flexWrap = 'wrap';
-  const exportBtn = el('button', 'btn btn-ghost', 'Экспорт');
+function renderSubscriptionsBlock(subs, subsError, instances, sys) {
+  const subSection = el('div', 'card p-4');
+  const subHeader = el('div', 'flex items-center justify-between mb-4');
+  subHeader.innerHTML = '<h2 class="text-lg font-semibold">Подписки</h2>';
+  const subActions = el('div', 'flex gap-2 flex-wrap');
+  const addSubBtn = el('button', 'btn btn-primary btn-sm');
+  addSubBtn.innerHTML = icon('plus') + '<span>Создать</span>';
+  addSubBtn.onclick = () => showCreateSubModal();
+  const exportBtn = el('button', 'btn btn-secondary btn-sm');
+  exportBtn.innerHTML = icon('download') + '<span>Экспорт</span>';
   exportBtn.onclick = async () => {
     await withLoading(exportBtn, async () => {
       try {
@@ -665,42 +592,25 @@ function renderSubscriptionsHead(subs, subsError) {
       } catch (e) { showToast('Ошибка экспорта: ' + e.message, 'error'); }
     });
   };
-  const importBtn = el('button', 'btn btn-ghost', 'Импорт');
+  const importBtn = el('button', 'btn btn-secondary btn-sm');
+  importBtn.textContent = 'Импорт';
   importBtn.onclick = () => showImportSubModal();
-  actions.appendChild(exportBtn);
-  actions.appendChild(importBtn);
-  actions.appendChild(makePrimaryButton('Создать', () => showCreateSubModal()));
-  return { title: 'Подписки', sub, action: actions };
-}
+  subActions.appendChild(addSubBtn);
+  subActions.appendChild(exportBtn);
+  subActions.appendChild(importBtn);
+  subHeader.appendChild(subActions);
+  subSection.appendChild(subHeader);
 
-// One panel per subscription, the same shape as the instances panel: head, facts,
-// and the service detail behind the disclosure.
-function renderSubscriptionsBlock(container, subs, subsError, instances, sys, memberships) {
+  const subList = el('div', 'space-y-3');
   if (subsError) {
-    const panel = el('section', 'panel');
-    const head = el('div', 'panel-head');
-    head.appendChild(el('h2', '', 'Сервис подписок недоступен'));
-    panel.appendChild(head);
-    const facts = el('div', 'facts');
-    facts.appendChild(el('div', 'fact-v', 'Проверьте, что olcrtc-server запущен с OLCRTC_SUB_ENABLED=1.'));
-    panel.appendChild(facts);
-    container.appendChild(panel);
-    return container;
+    subList.appendChild(el('div', 'text-amber-300 text-sm', 'Сервис подписок недоступен. Проверьте, что olcrtc-server запущен с OLCRTC_SUB_ENABLED=1.'));
+  } else if (!subs || subs.length === 0) {
+    subList.appendChild(el('div', 'text-gray-400 text-sm', 'Нет подписок'));
+  } else {
+    subs.forEach(sub => subList.appendChild(renderSubRow(sub, instances, sys, subs)));
   }
-  const list = Array.isArray(subs) ? subs : [];
-  if (list.length === 0) {
-    const panel = el('section', 'panel');
-    const head = el('div', 'panel-head');
-    head.appendChild(el('h2', '', 'Подписок нет'));
-    panel.appendChild(head);
-    const facts = el('div', 'facts');
-    facts.appendChild(el('div', 'fact-v', 'Создайте первую подписку кнопкой «Создать» в шапке.'));
-    panel.appendChild(facts);
-    container.appendChild(panel);
-    return container;
-  }
-  list.forEach(sub => container.appendChild(renderSubRow(sub, instances, sys, list, memberships)));
-  return container;
+  subSection.appendChild(subList);
+  return subSection;
 }
 
 function stopUsagePolling() {
@@ -734,6 +644,25 @@ function applyUsageSnapshot(snapshot) {
   if (total) total.textContent = String(Number(snapshot.active_peers) || 0);
 }
 
+function setUsageBadge(node, usage) {
+  node.className = 'badge';
+  if (!usage.usage_known) {
+    node.textContent = 'Нет данных';
+    node.title = 'Сервис ещё не опубликовал состояние подключений';
+    return;
+  }
+  if (usage.active_peers > 0) {
+    node.classList.add('badge-amber');
+    node.textContent = 'Используется · ' + usage.active_peers;
+    node.title = usage.oldest_connected_at
+      ? 'Самое раннее подключение: ' + new Date(usage.oldest_connected_at).toLocaleString()
+      : 'Есть активные подключения';
+    return;
+  }
+  node.classList.add('badge-emerald');
+  node.textContent = 'Свободен';
+  node.title = 'Активных подключений нет';
+}
 
 async function confirmBusyInstance(inst, action) {
   const usage = await refreshInstanceUsage(inst);
@@ -756,7 +685,7 @@ async function refreshInstanceUsage(inst) {
 }
 
 function renderInstanceGroups(instances, memberships) {
-  const root = el('div', '');
+  const root = el('div', 'space-y-4');
   // Group numbers are assigned in render order so "01" is always the first
   // block on screen. A user matches an instance to its group by number first,
   // shade second — on a monochrome canvas two adjacent greys are hard to tell
@@ -764,7 +693,7 @@ function renderInstanceGroups(instances, memberships) {
   let groupNumber = 0;
   if (!memberships) {
     root.appendChild(renderInstanceGroup('Все инстансы', instances, null));
-    root.appendChild(el('p', 'hint', 'Принадлежность к подпискам временно недоступна. Показан общий список.'));
+    root.appendChild(el('div', 'text-xs text-gray-500', 'Принадлежность к подпискам временно недоступна. Показан общий список.'));
     return root;
   }
 
@@ -794,48 +723,47 @@ function renderInstanceGroups(instances, memberships) {
   return root;
 }
 
-// A group is one panel, as in the mockup: the title and its one-line hint sit in
-// panel-head, the channels are rows under hairlines inside it.
 function renderInstanceGroup(title, instances, subscription, entries, groupNumber = 0) {
-  const panel = el('section', 'panel');
+  const group = el('section', 'instance-group');
+  const color = subscription ? subscriptionGroupColor(subscription.slug) : null;
+  if (color) {
+    group.classList.add('instance-group-subscription');
+    group.style.setProperty('--instance-group-accent', color.accent);
+    group.style.setProperty('--instance-group-border', color.border);
+    group.style.setProperty('--instance-group-bg', color.background);
+  }
 
-  const head = el('div', 'panel-head');
-  const heading = el('div', '');
-  const numbered = groupNumber > 0 ? String(groupNumber).padStart(2, '0') + ' ' + title : title;
-  heading.appendChild(el('h2', '', numbered));
-  head.appendChild(heading);
-  const hintBits = [instances.length + ' ' + pluralInstances(instances.length)];
-  if (subscription) hintBits.push(subscription.slug);
-  head.appendChild(el('span', 'hint', hintBits.join(', ')));
-  panel.appendChild(head);
+  const header = el('div', 'instance-group-header');
+  const heading = el('div', 'flex items-center gap-2 min-w-0');
+  if (groupNumber > 0) {
+    const marker = el('span', 'instance-group-marker' + (color ? '' : ' is-plain'));
+    marker.textContent = String(groupNumber).padStart(2, '0');
+    marker.title = 'Группа ' + groupNumber;
+    heading.appendChild(marker);
+  }
+  const text = el('div', 'min-w-0');
+  text.appendChild(el('div', 'font-semibold truncate', title));
+  text.appendChild(el('div', 'text-xs text-gray-500', instances.length + ' ' + pluralInstances(instances.length)));
+  heading.appendChild(text);
+  header.appendChild(heading);
+  if (subscription) {
+    const slug = el('span', 'badge');
+    slug.textContent = subscription.slug;
+    slug.style.borderColor = color.border;
+    header.appendChild(slug);
+  }
+  group.appendChild(header);
 
   const aliases = buildInstanceAliases(instances, subscription ? subscription.name : null, entries);
-  const rows = el('div', 'rows');
-  instances.forEach(instance => rows.appendChild(renderInstanceCard(instance, {
+  const grid = el('div', 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4');
+  instances.forEach(instance => grid.appendChild(renderInstanceCard(instance, {
     displayName: aliases.get(String(instance.id)),
     subscription,
+    color,
     groupNumber,
   })));
-  panel.appendChild(rows);
-
-  // details.more with the facts the mockup keeps behind a click.
-  const more = el('details', 'more');
-  more.appendChild(el('summary', '', 'Служебное группы'));
-  const facts = el('div', 'facts');
-  const factPairs = [
-    ['Инстансов в группе', String(instances.length)],
-    ['Активных', String(instances.filter(i => i.status === 'running' || i.status === 'active').length)],
-  ];
-  if (subscription) factPairs.push(['Подписка', subscription.slug]);
-  factPairs.forEach(pair => {
-    const cell = el('div', '');
-    cell.appendChild(el('div', 'fact-k', pair[0]));
-    cell.appendChild(el('div', 'fact-v num', pair[1]));
-    facts.appendChild(cell);
-  });
-  more.appendChild(facts);
-  panel.appendChild(more);
-  return panel;
+  group.appendChild(grid);
+  return group;
 }
 
 function buildInstanceAliases(instances, subscriptionName, entries = []) {
@@ -900,6 +828,35 @@ function cleanInstanceNamePart(value) {
     .replace(/[^\p{L}\p{N}]+/gu, '_')
     .replace(/^_+|_+$/g, '');
 }
+
+// Group colours are steps of one grey scale, not hues. A subscription still
+// gets a stable, distinct identity (same slug -> same step), but the panel
+// stays black & white and the identity never competes with a status colour.
+// Eight steps is the practical ceiling: past that, adjacent steps stop being
+// distinguishable on a dark canvas.
+// Group identity is a hue, not a shade. A monochrome ramp failed in practice:
+// two adjacent greys on a near-black canvas read as "the same grey", so the
+// user could not tell which instance belonged to which subscription.
+//
+// The palette is deliberately narrow and desaturated — six hues, all around
+// 55% lightness so none of them outranks a status colour — and it is separate
+// from the monochrome chrome. The UI stays black & white except for this one
+// job, where colour is the actual information.
+const GROUP_HUES = [200, 275, 145, 25, 320, 175];
+
+function subscriptionGroupColor(value) {
+  let hash = 0;
+  for (const char of String(value || 'subscription')) hash = ((hash * 31) + char.codePointAt(0)) | 0;
+  const hue = GROUP_HUES[Math.abs(hash) % GROUP_HUES.length];
+  return {
+    accent: `hsl(${hue} 62% 56%)`,
+    border: `hsl(${hue} 55% 48%)`,
+    // A low-alpha wash of the same hue keeps the block readable on black
+    // without turning it into a coloured slab.
+    background: `hsl(${hue} 55% 45% / 0.10)`,
+  };
+}
+
 function pluralInstances(count) {
   const mod10 = count % 10;
   const mod100 = count % 100;
@@ -913,230 +870,121 @@ function withInstanceName(rawURI, name) {
   return rawURI.replace(/#.*$/, '') + '#' + encodeURIComponent(name);
 }
 
-
-// fmtInstanceHistory folds the ribbon into runs so the rail is a handful of
-// elements instead of sixty, and counts what the state line explains.
-// One minute of the ribbon is one letter from /api/instances: L live, U flapping,
-// P at the limit, D dead, I stopped, and null when the panel has no measurement
-// for that minute. The panel never invents a state for a minute it did not
-// measure, and "no data" draws as nothing rather than as idle.
-const VL_STATE = {
-  L: { cls: 's-live', word: 'жив', colour: 'var(--st-live)' },
-  U: { cls: 's-degraded', word: 'рвётся', colour: 'var(--st-degraded)' },
-  P: { cls: 's-warn', word: 'на пределе', colour: 'var(--st-warn)' },
-  D: { cls: 's-down', word: 'мёртв', colour: 'var(--st-down)' },
-  I: { cls: 's-idle', word: 'остановлен', colour: 'var(--st-idle)' },
-};
-
-// fmtInstanceHistory folds the ribbon into runs and counts what the state line
-// explains. Each run keeps its mockup class and the colour the mockup paints.
-function fmtInstanceHistory(inst) {
-  const history = Array.isArray(inst.history) ? inst.history : [];
-  const runs = [];
-  const counts = { L: 0, U: 0, P: 0, D: 0, I: 0, gap: 0 };
-  let rejects = 0;
-  history.forEach(slot => {
-    const code = slot && typeof slot.state === 'string' ? slot.state : '';
-    const key = code && VL_STATE[code] ? code : 'gap';
-    counts[key] += 1;
-    if (slot && slot.rejects) rejects += slot.rejects;
-    const cls = key === 'gap' ? 'is-gap' : VL_STATE[key].cls;
-    const colour = key === 'gap' ? 'transparent' : VL_STATE[key].colour;
-    const last = runs[runs.length - 1];
-    if (last && last.cls === cls) last.n += 1;
-    else runs.push({ cls, colour, n: 1 });
-  });
-  return {
-    history,
-    runs,
-    counts,
-    rejects,
-    // One flapping episode per run of U: the page prints that as "разрывов".
-    breaks: runs.filter(run => run.cls === 's-degraded').length,
-    // history_complete === false is the normal case right after the panel
-    // restarts: the ring has not filled an hour yet. It is not an error.
-    complete: inst.history_complete !== false,
-  };
-}
-
-// fmtInstanceState answers "how is this channel now". The newest measured minute
-// wins; when it has no data, systemd decides and the reason says so.
-function fmtInstanceState(inst, agg) {
-  const last = agg.history.length ? agg.history[agg.history.length - 1] : null;
-  const code = last && typeof last.state === 'string' ? last.state : '';
-  if (code && VL_STATE[code]) {
-    const entry = VL_STATE[code];
-    let why = '';
-    if (code === 'U' && agg.counts.U > 0) why = '(разрывов за час: ' + agg.counts.U + ')';
-    else if (code === 'P' && agg.rejects > 0) why = '(429 за час: ' + agg.rejects + ')';
-    else if (code === 'P') why = '(у предела)';
-    return { cls: entry.cls, word: entry.word, why };
-  }
-  const measured = agg.history.length > 0;
-  const since = measured ? '(нет данных за последнюю минуту)' : '(истории пока нет)';
-  if (inst.status === 'failed') return { cls: 's-down', word: 'мёртв', why: measured ? '' : since };
-  if (inst.status === 'running' || inst.status === 'active') return { cls: 's-live', word: 'жив', why: since };
-  return { cls: 's-idle', word: 'остановлен', why: '' };
-}
-
-// The rail is drawn the way the mockup draws it: one strip per row, painted as a
-// linear-gradient of state segments, so the hour reads left to right without
-// sixty elements. Minutes with no data are transparent and show the tick mask.
-function fmtRailGradient(agg) {
-  const total = agg.runs.reduce((sum, run) => sum + run.n, 0) || 1;
-  let walked = 0;
-  const stops = agg.runs.map(run => {
-    const from = (walked / total) * 100;
-    walked += run.n;
-    const to = (walked / total) * 100;
-    return run.colour + ' ' + from.toFixed(2) + '% ' + to.toFixed(2) + '%';
-  });
-  return 'linear-gradient(90deg, ' + stops.join(', ') + ')';
-}
-
-// The usage poll rewrites this node every ten seconds. It used to be a badge with
-// its own colours; the mockup puts the number in row-metric, so the setter keeps
-// the node in place and only changes the number and the wording.
-function setUsageBadge(node, usage) {
-  if (!usage.usage_known) {
-    node.className = 'nok num';
-    node.textContent = 'нет данных';
-    node.title = 'Сервис ещё не опубликовал состояние подключений';
-    return;
-  }
-  const peers = Number(usage.active_peers) || 0;
-  node.className = 'num';
-  node.textContent = String(peers);
-  if (peers > 0) {
-    node.title = usage.oldest_connected_at
-      ? 'Самое раннее подключение: ' + new Date(usage.oldest_connected_at).toLocaleString()
-      : 'Есть активные подключения';
-  } else {
-    node.title = 'Активных подключений нет';
-  }
-}
-
-// Volume for the metric cell, in the mockup's units: one decimal, comma
-// separator, and no unit switch that would make two rows incomparable.
-function fmtByteVolume(bytes) {
-  if (!bytes) return '0 КБ';
-  const kb = bytes / 1024;
-  if (kb < 1024) return kb.toFixed(kb < 10 ? 1 : 0).replace('.', ',') + ' КБ';
-  const mb = kb / 1024;
-  return mb.toFixed(mb < 10 ? 1 : 0).replace('.', ',') + ' МБ';
-}
-
-function peersWord(count) {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) return 'клиент';
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'клиента';
-  return 'клиентов';
-}
-
-// A channel row, structurally identical to the mockup:
-// row > [ row-id + row-sub | chan ( state + rail + rail-label ) | row-metric | row-actions ]
-// The create screen as a route, transplanted from ofx-design/admin-instance-new.html:
-// the same head, the carrier tiles, the panels and the footer. The fields are the
-// modal's own builder, so nothing can drift and the modal keeps working.
 function renderInstanceCard(inst, context = {}) {
-  const row = el('div', 'row');
+  const card = el('div', 'card card-hover instance-card p-4 flex flex-col gap-3');
   const displayName = (inst.carrier === 'openflux' && inst.name) ? inst.name : (context.displayName || inst.name || inst.label);
   const displayURI = withInstanceName(inst.uri, displayName);
-  const agg = fmtInstanceHistory(inst);
 
-  const idBox = el('div', '');
-  // The name is the way into the channel card: a real link, so it is focusable and
-  // middle-clickable, routed inside the SPA.
-  const nameLink = el('a', 'row-id', displayName);
-  nameLink.href = '/instances/' + inst.id;
-  nameLink.title = 'Открыть карточку канала';
-  nameLink.onclick = (e) => { e.preventDefault(); route('/instances/' + inst.id); };
-  idBox.appendChild(nameLink);
-  const groupTag = context.groupNumber ? String(context.groupNumber).padStart(2, '0') + ' · ' : '';
-  // Mockup row-sub: the transport and the carrier, in the words the config uses.
-  const transportLine = [inst.transport, inst.carrier].filter(Boolean).join(', ');
-  const sub = el('div', 'row-sub', groupTag + '#' + inst.id + ' · ' + (transportLine || inst.label || ''));
-  if (inst.name && inst.name !== displayName) sub.title = 'Имя в конфигурации: ' + inst.name;
-  idBox.appendChild(sub);
-  // Wbstream cannot come up without a room and cannot connect with an expired
-  // token. The mockup has no badge slot, so the reason sits on the row itself.
+  // Header: status + label
+  const head = el('div', 'flex items-center justify-between gap-2');
+  const left = el('div', 'flex items-center gap-2 min-w-0');
+  const dot = el('span', 'status-dot ' + fmtStatusDot(inst.status));
+  dot.setAttribute('aria-hidden', 'true');
+  const labelWrap = el('div', 'flex flex-col min-w-0');
+  const labelEl = el('div', 'font-semibold truncate');
+  labelEl.textContent = displayName;
+  const idEl = el('div', 'text-xs text-gray-500');
+  // The group number is repeated on the card: matching an instance to its
+  // group must not require scrolling back to the header.
+  const groupTag = context.groupNumber
+    ? String(context.groupNumber).padStart(2, '0') + ' · '
+    : '';
+  idEl.textContent = groupTag + '#' + inst.id + ' · ' + (inst.label || '');
+  if (inst.name && inst.name !== displayName) idEl.title = 'Имя в конфигурации: ' + inst.name;
+  labelWrap.appendChild(labelEl);
+  labelWrap.appendChild(idEl);
+  left.appendChild(dot);
+  left.appendChild(labelWrap);
+  const pill = fmtStatusPill(inst.status);
+  const pillEl = el('span', 'status-pill ' + pill.cls);
+  pillEl.textContent = pill.label;
+  head.appendChild(left);
+  head.appendChild(pillEl);
+  card.appendChild(head);
+
+  // Badges
+  const badges = el('div', 'flex flex-wrap gap-1.5');
+  const usageBadge = el('span', 'badge');
+  usageBadge.dataset.instanceUsage = String(inst.id);
+  setUsageBadge(usageBadge, inst);
+  const carrierBadge = el('span', 'badge badge-blue');
+  carrierBadge.innerHTML = icon('tag', 12) + '<span>' + (inst.carrier || '-') + '</span>';
+  const transportBadge = el('span', 'badge');
+  // Human-readable transport names + room-setup hints: raw values like
+  // "vyandex"/"cupsonline" mean nothing at a glance. Mirrors
+  // ProfileEditorDialog.kt labels on the Android client.
+  const transportInfo = fmtTransportInfo(inst);
+  transportBadge.innerHTML = icon('wifi', 12) + '<span>' + transportInfo.label + '</span>';
+  if (transportInfo.hint) transportBadge.title = transportInfo.hint;
+  badges.appendChild(usageBadge);
+  badges.appendChild(carrierBadge);
+  badges.appendChild(transportBadge);
+  if (context.subscription) {
+    const subscriptionBadge = el('span', 'badge');
+    subscriptionBadge.textContent = context.subscription.name;
+    if (context.color) subscriptionBadge.style.borderColor = context.color.border;
+    badges.appendChild(subscriptionBadge);
+  }
+  if (inst.carrier === 'jitsi') {
+    const bridgeBadge = el('span', 'badge');
+    bridgeBadge.innerHTML = icon('sliders-horizontal', 12) + '<span>bridge: ' + (inst.jitsi_bridge_mode || 'auto') + '</span>';
+    bridgeBadge.title = 'Jitsi bridge mode: auto, colibri-ws или sctp';
+    badges.appendChild(bridgeBadge);
+  }
   if (inst.carrier === 'wbstream' && (!inst.room_id || inst.room_id === 'any')) {
-    const warn = el('div', 'row-sub nok', 'нужен Room ID');
-    warn.title = 'wbstream больше не создаёт румы автоматически: задайте Room ID в настройках инстанса';
-    idBox.appendChild(warn);
+    const noRoomBadge = el('span', 'badge badge-amber');
+    noRoomBadge.innerHTML = icon('alert-triangle', 12) + '<span>Room ID required</span>';
+    noRoomBadge.title = 'wbstream больше не создаёт румы автоматически — задайте Room ID в настройках инстанса';
+    badges.appendChild(noRoomBadge);
   }
   if (inst.carrier === 'wbstream' && inst.auth_token_expired) {
-    const warn = el('div', 'row-sub nok', 'токен истёк');
-    warn.title = inst.auth_token_expires_at
+    const expiredBadge = el('span', 'badge badge-amber');
+    expiredBadge.innerHTML = icon('alert-circle', 12) + '<span>Токен истёк</span>';
+    expiredBadge.title = inst.auth_token_expires_at
       ? 'Истёк ' + new Date(inst.auth_token_expires_at * 1000).toLocaleString()
       : 'Обновите общий WB-токен в Настройках';
-    idBox.appendChild(warn);
+    badges.appendChild(expiredBadge);
   }
-  row.appendChild(idBox);
-
-  const chan = el('div', 'chan is-link');
-  // The channel cell is the other way in: clicking the state or the hour opens the
-  // card. Keyboard users have the name link above, so this stays a shortcut.
-  chan.title = 'Открыть карточку канала';
-  chan.onclick = () => route('/instances/' + inst.id);
-  const state = fmtInstanceState(inst, agg);
-  const stateEl = el('div', 'state ' + state.cls);
-  stateEl.appendChild(document.createTextNode(state.word + (state.why ? ' ' : '')));
-  if (state.why) stateEl.appendChild(el('span', 'state-note', state.why));
-  chan.appendChild(stateEl);
-  if (agg.runs.length) {
-    const rail = el('i', 'rail');
-    rail.setAttribute('style', 'background-image: ' + fmtRailGradient(agg));
-    rail.setAttribute('aria-label', 'история канала за час, минута на деление');
-    chan.appendChild(rail);
-    const labels = el('div', 'rail-label');
-    labels.appendChild(el('span', '', '−60 мин'));
-    if (!agg.complete) labels.appendChild(el('span', '', 'данных пока меньше часа'));
-    labels.appendChild(el('span', '', 'сейчас'));
-    chan.appendChild(labels);
-  } else {
-    chan.appendChild(el('div', 'rail-empty', 'истории пока нет, рейка начнётся с первой минуты'));
+  if (inst.carrier === 'openflux') {
+    if (inst.has_openflux_key) {
+      const encBadge = el('span', 'badge badge-emerald');
+      encBadge.innerHTML = icon('lock', 12) + '<span>AES-256-GCM</span>';
+      encBadge.title = 'Шифрование OpenFlux включено (AES-256-GCM)';
+      badges.appendChild(encBadge);
+    } else {
+      const noEncBadge = el('span', 'badge');
+      noEncBadge.innerHTML = icon('unlock', 12) + '<span>без шифрования</span>';
+      noEncBadge.title = 'Шифрование OpenFlux отключено. Для включения укажите ключ в настройках инстанса';
+      badges.appendChild(noEncBadge);
+    }
   }
-  row.appendChild(chan);
-
-  // Mockup metric cell: "<b class=num>3,1</b> МБ / <b class=num>1</b> клиент",
-  // then uptime under a break. The hour's volume is the sum of the ring's
-  // per-minute bytes; when no slot carries a number the cell says so instead of
-  // showing a zero.
-  const metric = el('div', 'row-metric');
-  const hourBytes = agg.history.reduce((sum, slot) => {
-    return sum + (slot && typeof slot.bytes === 'number' ? slot.bytes : 0);
-  }, 0);
-  const bytesKnown = agg.history.some(slot => slot && typeof slot.bytes === 'number');
-  if (bytesKnown) {
-    metric.appendChild(el('b', 'num', fmtByteVolume(hourBytes)));
-  } else {
-    metric.appendChild(el('span', 'nok', 'нет данных'));
-  }
-  metric.appendChild(document.createTextNode(' / '));
-  const peersNode = el('b', 'num');
-  peersNode.dataset.instanceUsage = String(inst.id);
-  setUsageBadge(peersNode, inst);
-  metric.appendChild(peersNode);
-  metric.appendChild(document.createTextNode(' ' + peersWord(Number(inst.active_peers) || 0)));
   if (inst.uptime) {
-    metric.appendChild(document.createElement('br'));
-    metric.appendChild(el('span', 'nok num', inst.uptime));
+    const upBadge = el('span', 'badge');
+    upBadge.innerHTML = icon('clock', 12) + '<span>' + inst.uptime + '</span>';
+    badges.appendChild(upBadge);
   }
-  row.appendChild(metric);
+  card.appendChild(badges);
 
-  const actions = el('div', 'row-actions');
-  const uriBtn = el('button', 'btn btn-ghost btn-sm');
+  // Meta rows
+  const meta = el('div', 'space-y-1.5 text-xs');
+  meta.appendChild(metaRow(inst.carrier === 'openflux' ? 'Ссылка на документ' : 'Room ID', inst.room_id || '—', inst.room_id));
+  if (inst.has_auth_token) {
+    meta.appendChild(metaRow('Auth token', 'задан', 'QR включает токен для импорта полного профиля'));
+  }
+  card.appendChild(meta);
+
+  // Actions
+  const actions = el('div', 'flex flex-wrap gap-1.5 mt-1');
+  const uriBtn = el('button', 'btn btn-secondary btn-sm');
   uriBtn.setAttribute('aria-label', 'Копировать URI');
-  uriBtn.textContent = 'URI';
+  uriBtn.innerHTML = icon('copy') + '<span>URI</span>';
   uriBtn.onclick = () => {
     navigator.clipboard.writeText(displayURI);
     showToast('URI скопирован');
   };
-  const qrBtn = el('button', 'btn btn-ghost btn-sm');
+  const qrBtn = el('button', 'btn btn-secondary btn-sm');
   qrBtn.setAttribute('aria-label', 'Показать QR-код');
-  qrBtn.textContent = 'QR';
+  qrBtn.innerHTML = icon('qr-code') + '<span>QR</span>';
   qrBtn.onclick = async () => {
     await withLoading(qrBtn, async () => {
       try {
@@ -1147,9 +995,9 @@ function renderInstanceCard(inst, context = {}) {
       }
     });
   };
-  const pingBtn = el('button', 'btn btn-ghost btn-sm');
+  const pingBtn = el('button', 'btn btn-secondary btn-sm');
   pingBtn.setAttribute('aria-label', 'Проверить соединение');
-  pingBtn.textContent = 'Пинг';
+  pingBtn.innerHTML = icon('wifi') + '<span>Пинг</span>';
   pingBtn.onclick = async () => {
     await withLoading(pingBtn, async () => {
       try {
@@ -1171,15 +1019,12 @@ function renderInstanceCard(inst, context = {}) {
       }
     });
   };
-  const cfgBtn = el('button', 'btn btn-ghost btn-sm');
+  const cfgBtn = el('button', 'btn btn-secondary btn-sm');
   cfgBtn.setAttribute('aria-label', 'Настройки инстанса');
-  cfgBtn.textContent = 'Конфиг';
-  // One click to the form, as before: the owner asked for the modal back. The
-  // card stays reachable through the name and the channel cell, not through here.
-  cfgBtn.title = fmtTransportInfo(inst).hint || 'Настройки инстанса';
+  cfgBtn.innerHTML = icon('sliders') + '<span>Настройки</span>';
   cfgBtn.onclick = () => showConfigModal(inst);
   const isRunning = inst.status === 'running';
-  const startStopBtn = el('button', isRunning ? 'btn btn-ghost btn-sm btn-icon' : 'btn btn-primary btn-sm btn-icon');
+  const startStopBtn = el('button', isRunning ? 'btn btn-secondary btn-sm btn-icon' : 'btn btn-success btn-sm btn-icon');
   startStopBtn.setAttribute('aria-label', isRunning ? 'Остановить' : 'Запустить');
   startStopBtn.title = isRunning ? 'Остановить' : 'Запустить';
   startStopBtn.innerHTML = isRunning ? icon('stop') : icon('play');
@@ -1194,7 +1039,7 @@ function renderInstanceCard(inst, context = {}) {
       } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
     });
   };
-  const restartBtn = el('button', 'btn btn-ghost btn-sm btn-icon');
+  const restartBtn = el('button', 'btn btn-secondary btn-sm btn-icon');
   restartBtn.setAttribute('aria-label', 'Перезапустить');
   restartBtn.title = 'Перезапустить';
   restartBtn.innerHTML = icon('refresh-cw');
@@ -1208,24 +1053,12 @@ function renderInstanceCard(inst, context = {}) {
       } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
     });
   };
-  // The mockup's row carries two controls, and seven buttons made the row noisy
-  // next to a two-line channel cell. The client link, the card and the power
-  // switch stay visible; QR, ping, restart and delete sit behind one disclosure.
-  // It is plain details/summary, so no JS state, and every handler, confirm
-  // included, is the same object it was before.
   actions.appendChild(uriBtn);
+  actions.appendChild(qrBtn);
+  actions.appendChild(pingBtn);
   actions.appendChild(cfgBtn);
   actions.appendChild(startStopBtn);
-  const menu = el('details', 'row-menu');
-  const menuBtn = el('summary', 'btn btn-ghost btn-sm btn-icon');
-  menuBtn.setAttribute('aria-label', 'Остальные действия');
-  menuBtn.title = 'Остальные действия';
-  menuBtn.innerHTML = icon('chevron-down');
-  menu.appendChild(menuBtn);
-  const menuBody = el('div', '');
-  menuBody.appendChild(qrBtn);
-  menuBody.appendChild(pingBtn);
-  menuBody.appendChild(restartBtn);
+  actions.appendChild(restartBtn);
   if (inst.id !== 0) {
     const delBtn = el('button', 'btn btn-danger btn-sm btn-icon');
     delBtn.setAttribute('aria-label', 'Удалить инстанс');
@@ -1250,299 +1083,10 @@ function renderInstanceCard(inst, context = {}) {
         render();
       } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
     };
-    menuBody.appendChild(delBtn);
+    actions.appendChild(delBtn);
   }
-  menu.appendChild(menuBody);
-  actions.appendChild(menu);
-  row.appendChild(actions);
-  return row;
-}
-
-// Shared by the row and the instance page: the same ping and the same QR, so the
-// two places cannot drift apart.
-async function pingInstance(inst, btn) {
-  await withLoading(btn, async () => {
-    try {
-      const res = await api('/instances/' + inst.id + '/ping', { method: 'POST' });
-      const targetLabel = ({
-        socks_proxy: 'SOCKS',
-        warp_proxy: 'WARP',
-        internet: 'интернет',
-      })[res.target_kind] || res.target_kind || 'цель';
-      if (res && res.ok) {
-        const rtt = (res.rtt_ms != null) ? res.rtt_ms.toFixed(1) + ' мс' : '';
-        const loss = (res.packet_loss != null && res.packet_loss > 0) ? ` · потери ${res.packet_loss}%` : '';
-        showToast(`${targetLabel} ${res.target} · ${rtt}${loss}`, 'success');
-      } else {
-        showToast(res.message || `Не удалось пинговать ${targetLabel}`, 'error');
-      }
-    } catch (e) {
-      showToast('Ошибка пинга: ' + e.message, 'error');
-    }
-  });
-}
-
-async function openInstanceQR(inst, displayName, btn) {
-  await withLoading(btn, async () => {
-    try {
-      const res = await api('/instances/' + inst.id + '/qr');
-      showQRModal(withInstanceName(res.uri || inst.uri, displayName), { ...inst, name: displayName });
-    } catch (e) {
-      showToast('Ошибка QR: ' + e.message, 'error');
-    }
-  });
-}
-
-// The mockup's fact block: label above value, value in the number face.
-function makeFact(label, value, opts = {}) {
-  const cell = el('div', '');
-  cell.appendChild(el('div', 'fact-k', label));
-  const cls = 'fact-v' + (opts.mono === false ? '' : ' num') + (opts.copy ? ' copyable' : '');
-  const val = el('div', cls, value);
-  if (opts.id) val.id = opts.id;
-  if (opts.title) val.title = opts.title;
-  cell.appendChild(val);
-  return cell;
-}
-
-function instanceDisplayName(inst) {
-  return (inst.carrier === 'openflux' && inst.name) ? inst.name : (inst.name || inst.label || ('#' + inst.id));
-}
-
-// The instance page, transplanted from ofx-design/admin-instance.html: the same
-// head, the same three panels, the same disclosure. showConfigModal stays the
-// form behind "Изменить"; the page does not try to be the form.
-async function renderInstancePage(app, id) {
-  const frame = renderShell('instances');
-
-  let sys = {};
-  let instances = [];
-  try { sys = await api('/system/status'); } catch (e) { console.error(e); }
-  if (sys.version) panelVersion = sys.version;
-  try { instances = await api('/instances'); } catch (e) { console.error(e); }
-  instances.forEach(instance => latestInstanceUsage.set(String(instance.id), instance));
-
-  const head = el('div', 'head');
-  const left = el('div', '');
-  const backBtn = el('button', 'btn btn-ghost btn-sm');
-  backBtn.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg>Все инстансы';
-  backBtn.style.marginBottom = 'var(--s-2)';
-  backBtn.onclick = () => route('/instances');
-  left.appendChild(backBtn);
-
-  const inst = instances.find(item => Number(item.id) === Number(id));
-  if (!inst) {
-    left.appendChild(el('h1', '', 'Инстанс не найден'));
-    left.appendChild(el('p', 'sub', 'Возможно, он удалён или номер в ссылке неверный.'));
-    head.appendChild(left);
-    frame.main.appendChild(head);
-    app.appendChild(frame.shell);
-    return;
-  }
-
-  const displayName = instanceDisplayName(inst);
-  const displayURI = withInstanceName(inst.uri, displayName);
-  const agg = fmtInstanceHistory(inst);
-  const state = fmtInstanceState(inst, agg);
-  const isRunning = inst.status === 'running';
-  const peers = Number(inst.active_peers) || 0;
-
-  left.appendChild(el('h1', '', displayName));
-  const subBits = [inst.transport, inst.carrier].filter(Boolean).join(', ');
-  const subParts = [];
-  if (subBits) subParts.push(subBits);
-  if (inst.uptime) subParts.push('работает ' + inst.uptime);
-  left.appendChild(el('p', 'sub', subParts.join(', ')));
-  head.appendChild(left);
-
-  const headActions = el('div', '');
-  headActions.style.display = 'flex';
-  headActions.style.gap = 'var(--s-2)';
-  const pingBtn = el('button', 'btn btn-ghost', 'Проверить связь');
-  pingBtn.onclick = () => pingInstance(inst, pingBtn);
-  const qrBtn = el('button', 'btn btn-ghost', 'QR');
-  qrBtn.onclick = () => openInstanceQR(inst, displayName, qrBtn);
-  const powerBtn = el('button', isRunning ? 'btn btn-danger' : 'btn btn-primary', isRunning ? 'Остановить' : 'Запустить');
-  powerBtn.onclick = async () => {
-    const action = isRunning ? 'stop' : 'start';
-    if (action === 'stop' && !(await confirmBusyInstance(inst, 'Остановить'))) return;
-    await withLoading(powerBtn, async () => {
-      try {
-        await api('/instances/' + inst.id + '/' + action, { method: 'POST' });
-        showToast(action === 'stop' ? 'Остановлено' : 'Запущено');
-        render();
-      } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
-    });
-  };
-  headActions.appendChild(pingBtn);
-  headActions.appendChild(qrBtn);
-  headActions.appendChild(powerBtn);
-  head.appendChild(headActions);
-  frame.main.appendChild(head);
-
-  const body = el('div', 'body');
-
-  // Panel 1: the hour, drawn the mockup's way, with the page's own facts.
-  const channelPanel = el('section', 'panel');
-  const channelHead = el('div', 'panel-head');
-  channelHead.appendChild(el('h2', '', 'Канал за час'));
-  const stateEl = el('div', 'state ' + state.cls);
-  stateEl.appendChild(document.createTextNode(state.word + (state.why ? ' ' : '')));
-  if (state.why) stateEl.appendChild(el('span', 'state-note', state.why));
-  channelHead.appendChild(stateEl);
-  channelPanel.appendChild(channelHead);
-
-  const channelBody = el('div', '');
-  channelBody.style.padding = 'var(--s-4)';
-  channelBody.style.display = 'flex';
-  channelBody.style.flexDirection = 'column';
-  channelBody.style.gap = 'var(--s-4)';
-  if (agg.runs.length) {
-    const rail = el('i', 'rail');
-    rail.setAttribute('style', 'height: 26px; background-image: ' + fmtRailGradient(agg));
-    rail.setAttribute('aria-label', 'история канала за час, минута на деление');
-    channelBody.appendChild(rail);
-    const labels = el('div', 'rail-label');
-    labels.appendChild(el('span', '', '−60 мин'));
-    labels.appendChild(el('span', '', '−30 мин'));
-    labels.appendChild(el('span', '', 'сейчас'));
-    channelBody.appendChild(labels);
-  } else {
-    channelBody.appendChild(el('div', 'rail-empty', 'истории пока нет, рейка начнётся с первой минуты'));
-  }
-
-  const bytesKnown = agg.history.some(slot => slot && typeof slot.bytes === 'number');
-  const hourBytes = agg.history.reduce((sum, slot) => sum + (slot && typeof slot.bytes === 'number' ? slot.bytes : 0), 0);
-  const channelFacts = el('div', 'facts');
-  channelFacts.style.padding = '0';
-  channelFacts.style.gridTemplateColumns = 'repeat(auto-fit, minmax(140px, 1fr))';
-  channelFacts.appendChild(makeFact('Объём', bytesKnown ? fmtByteVolume(hourBytes) : 'нет данных'));
-  channelFacts.appendChild(makeFact('Клиентов на канале', String(peers)));
-  channelFacts.appendChild(makeFact('Uptime', inst.uptime || '-'));
-  channelFacts.appendChild(makeFact('Разрывов за час', String(agg.breaks)));
-  channelFacts.appendChild(makeFact('Минут в буфере', agg.history.length + ' из 60'));
-  channelBody.appendChild(channelFacts);
-  channelPanel.appendChild(channelBody);
-  body.appendChild(channelPanel);
-
-  // Panel 2: what a client needs, then the service facts and the log tail.
-  const connPanel = el('section', 'panel');
-  const connHead = el('div', 'panel-head');
-  connHead.appendChild(el('h2', '', 'Подключение'));
-  connHead.appendChild(el('span', 'hint', 'клиент видит инстанс по QR и ссылке'));
-  connPanel.appendChild(connHead);
-  const connFacts = el('div', 'facts');
-  connFacts.appendChild(makeFact(inst.carrier === 'openflux' ? 'Ссылка на документ' : 'Комната', inst.room_id || '—'));
-  const codecBits = [];
-  if (inst.openflux_codec) codecBits.push(inst.openflux_codec);
-  if (inst.vp8_fps) codecBits.push(inst.vp8_fps + ' fps');
-  if (inst.vp8_batch) codecBits.push('пакет ' + inst.vp8_batch);
-  connFacts.appendChild(makeFact('Кодек', codecBits.join(', ') || '-'));
-  connFacts.appendChild(makeFact('Выход', sys.public_ip || '-'));
-  connFacts.appendChild(makeFact('Клиентов на канале', String(peers)));
-  connPanel.appendChild(connFacts);
-
-  const more = el('details', 'more');
-  more.appendChild(el('summary', '', 'Служебное: токен авторизации, лимиты, лог'));
-  const moreFacts = el('div', 'facts');
-  const tokenValue = inst.has_auth_token
-    ? ('задан' + (inst.auth_token_expires_at ? ', истекает ' + new Date(inst.auth_token_expires_at * 1000).toLocaleDateString() : ''))
-    : 'не задан';
-  moreFacts.appendChild(makeFact('Токен авторизации', tokenValue));
-  if (inst.carrier === 'openflux') {
-    moreFacts.appendChild(makeFact('Шифрование', inst.has_openflux_key ? 'AES-256-GCM' : 'без шифрования'));
-  }
-  if (inst.client_id) moreFacts.appendChild(makeFact('Client ID', inst.client_id));
-  if (inst.dns) moreFacts.appendChild(makeFact('DNS', inst.dns));
-  if (inst.socks_proxy) moreFacts.appendChild(makeFact('SOCKS', inst.socks_proxy));
-  if (inst.warp_proxy) moreFacts.appendChild(makeFact('WARP', inst.warp_proxy));
-  more.appendChild(moreFacts);
-  const logPre = el('pre', 'num');
-  logPre.style.margin = 'var(--s-3) 0 0';
-  logPre.style.padding = 'var(--s-3)';
-  logPre.style.background = 'var(--bg-deep)';
-  logPre.style.border = '1px solid var(--line)';
-  logPre.style.borderRadius = 'var(--r-1)';
-  logPre.style.fontSize = 'var(--fs-11)';
-  logPre.style.color = 'var(--ink-muted)';
-  logPre.style.overflowX = 'auto';
-  logPre.textContent = 'Загрузка...';
-  more.appendChild(logPre);
-  // The log is only fetched when the disclosure is opened: the page should not
-  // pay for 20 lines of journal on every visit.
-  more.addEventListener('toggle', async () => {
-    if (!more.open) return;
-    try {
-      const data = await api('/system/logs/olcrtc-server@' + inst.id + '?lines=20');
-      logPre.textContent = data.logs || '(пусто)';
-    } catch (e) {
-      logPre.textContent = 'Ошибка: ' + e.message;
-    }
-  });
-  connPanel.appendChild(more);
-  body.appendChild(connPanel);
-
-  // Panel 3: the actions the mockup groups here.
-  const actPanel = el('section', 'panel');
-  const actHead = el('div', 'panel-head');
-  actHead.appendChild(el('h2', '', 'Действия'));
-  actHead.appendChild(el('span', 'hint', 'второстепенное живёт в «Конфиге»'));
-  actPanel.appendChild(actHead);
-  const actFacts = el('div', 'facts');
-
-  const linkCell = el('div', '');
-  linkCell.appendChild(el('div', 'fact-k', 'Ссылка для клиента'));
-  const linkRow = el('div', 'fact-v');
-  const copyBtn = el('button', 'btn btn-ghost btn-sm', 'Скопировать');
-  copyBtn.onclick = () => {
-    navigator.clipboard.writeText(displayURI);
-    showToast('URI скопирован');
-  };
-  const openQrBtn = el('button', 'btn btn-ghost btn-sm', 'Открыть QR');
-  openQrBtn.onclick = () => openInstanceQR(inst, displayName, openQrBtn);
-  linkRow.appendChild(copyBtn);
-  linkRow.appendChild(document.createTextNode(' '));
-  linkRow.appendChild(openQrBtn);
-  linkCell.appendChild(linkRow);
-  actFacts.appendChild(linkCell);
-
-  const cfgCell = el('div', '');
-  cfgCell.appendChild(el('div', 'fact-k', 'Конфигурация'));
-  const cfgRow = el('div', 'fact-v');
-  const editBtn = el('button', 'btn btn-ghost btn-sm', 'Изменить');
-  editBtn.onclick = () => showConfigModal(inst);
-  cfgRow.appendChild(editBtn);
-  cfgCell.appendChild(cfgRow);
-  actFacts.appendChild(cfgCell);
-
-  const svcCell = el('div', '');
-  svcCell.appendChild(el('div', 'fact-k', 'Сервис'));
-  const svcRow = el('div', 'fact-v');
-  const restartBtn = el('button', 'btn btn-ghost btn-sm', 'Перезапустить');
-  restartBtn.onclick = async () => {
-    if (!(await confirmBusyInstance(inst, 'Перезапустить'))) return;
-    await withLoading(restartBtn, async () => {
-      try {
-        await api('/instances/' + inst.id + '/restart', { method: 'POST' });
-        showToast('Перезапущено');
-        render();
-      } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
-    });
-  };
-  const logsBtn = el('button', 'btn btn-ghost btn-sm', 'Логи');
-  logsBtn.onclick = () => showLogsModal('olcrtc-server@' + inst.id);
-  svcRow.appendChild(restartBtn);
-  svcRow.appendChild(document.createTextNode(' '));
-  svcRow.appendChild(logsBtn);
-  svcCell.appendChild(svcRow);
-  actFacts.appendChild(svcCell);
-
-  actPanel.appendChild(actFacts);
-  body.appendChild(actPanel);
-
-  frame.main.appendChild(body);
-  app.appendChild(frame.shell);
-  startUsagePolling();
+  card.appendChild(actions);
+  return card;
 }
 
 function metaRow(label, value, copyValue) {
@@ -1565,61 +1109,26 @@ function metaRow(label, value, copyValue) {
   return row;
 }
 
-function renderSubRow(sub, instances, sys, allSubs, memberships) {
-  const panel = el('section', 'panel');
+function renderSubRow(sub, instances, sys, allSubs) {
+  const row = el('div', 'card p-3 flex flex-col md:flex-row md:items-center justify-between gap-2');
   const subBase = (sys.subscription_public_url || sys.admin_url || location.origin).replace(/\/+$/, '');
   const subURL = subBase + '/sub/' + sub.slug;
   const openURL = subURL + '/open';
-
-  // Which instances of this subscription are linked, from the memberships the
-  // dashboard already fetched: no extra request per row.
-  const linked = [];
-  (memberships || []).forEach(group => {
-    if (!group || !group.subscription || group.subscription.slug !== sub.slug) return;
-    (group.entries || []).forEach(entry => {
-      if (entry.source_instance_id === null || entry.source_instance_id === undefined) return;
-      const inst = (instances || []).find(item => String(item.id) === String(entry.source_instance_id));
-      if (inst) linked.push(instanceDisplayName(inst));
-    });
-  });
-
-  const head = el('div', 'panel-head');
-  head.appendChild(el('h2', '', sub.name + ' [' + sub.slug + ']'));
-  const hintBits = [];
-  if (linked.length) hintBits.push(linked.length + ' ' + pluralInstances(linked.length));
-  hintBits.push(sys.mirror_enabled ? 'зеркало включено' : 'зеркало выключено');
-  head.appendChild(el('span', 'hint', hintBits.join(', ')));
-  panel.appendChild(head);
-
-  const facts = el('div', 'facts');
-
-  // Public URL: readable and copyable, the thing people hand out.
-  const urlCell = el('div', '');
-  urlCell.appendChild(el('div', 'fact-k', 'Публичная ссылка'));
-  const urlRow = el('div', 'fact-v num');
-  const urlText = el('span', 'copyable', subURL);
-  urlText.title = subURL;
-  urlRow.appendChild(urlText);
-  urlCell.appendChild(urlRow);
-  const urlActions = el('div', '');
-  urlActions.style.display = 'flex';
-  urlActions.style.gap = 'var(--s-1)';
-  urlActions.style.marginTop = 'var(--s-1)';
-  const copyBtn = el('button', 'btn btn-ghost btn-sm', 'Скопировать');
-  copyBtn.onclick = () => { navigator.clipboard.writeText(subURL); showToast('Ссылка скопирована'); };
-  const viewBtn = el('button', 'btn btn-ghost btn-sm', 'Открыть');
+  const left = el('div', 'flex-1 min-w-0');
+  left.innerHTML = `
+    <div class="font-medium">${sub.name} <span class="text-gray-500">[${sub.slug}]</span></div>
+    <div class="text-gray-400 text-xs mt-1 copyable truncate" title="${subURL}">${subURL}</div>
+    <div class="text-gray-500 text-xs mt-1 copyable truncate" title="${openURL}">Обычная ссылка: ${openURL}</div>
+  `;
+  const right = el('div', 'flex gap-1.5 flex-wrap');
+  const viewBtn = el('button', 'btn btn-secondary btn-sm');
+  viewBtn.innerHTML = icon('eye') + '<span>Просмотр</span>';
   viewBtn.onclick = () => window.open(subURL, '_blank');
-  urlActions.appendChild(copyBtn);
-  urlActions.appendChild(viewBtn);
-  urlCell.appendChild(urlActions);
-  facts.appendChild(urlCell);
-
-  // QR and the bootstrap link: both need the mirror, so one button reports the
-  // mirror state and the other copies the encrypted entry point.
-  const qrCell = el('div', '');
-  qrCell.appendChild(el('div', 'fact-k', 'QR и прямая ссылка'));
-  const qrRow = el('div', 'fact-v');
-  const qrBtn = el('button', 'btn btn-ghost btn-sm', 'QR');
+  const compositionBtn = el('button', 'btn btn-secondary btn-sm');
+  compositionBtn.innerHTML = icon('settings') + '<span>Состав</span>';
+  compositionBtn.onclick = () => showManageSubInstancesModal(sub, instances, allSubs);
+  const qrBtn = el('button', 'btn btn-secondary btn-sm');
+  qrBtn.innerHTML = icon('qr-code') + '<span>QR</span>';
   qrBtn.title = 'QR подписки: URL + encrypted mirror';
   qrBtn.onclick = async () => {
     await withLoading(qrBtn, async () => {
@@ -1639,7 +1148,8 @@ function renderSubRow(sub, instances, sys, allSubs, memberships) {
       }
     });
   };
-  const linkBtn = el('button', 'btn btn-ghost btn-sm', 'Прямая ссылка');
+  const linkBtn = el('button', 'btn btn-secondary btn-sm');
+  linkBtn.innerHTML = icon('link') + '<span>Ссылка</span>';
   linkBtn.title = 'Скопировать прямую bootstrap-ссылку с ключом Yandex mirror. Передавайте только получателю подписки.';
   linkBtn.onclick = async () => {
     await withLoading(linkBtn, async () => {
@@ -1654,66 +1164,10 @@ function renderSubRow(sub, instances, sys, allSubs, memberships) {
       }
     });
   };
-  qrRow.appendChild(qrBtn);
-  qrRow.appendChild(document.createTextNode(' '));
-  qrRow.appendChild(linkBtn);
-  qrCell.appendChild(qrRow);
-  facts.appendChild(qrCell);
-
-  // Mirror: state, address and the time of the last refresh, which is only known
-  // after a sync, so the cell starts honest and fills in when it runs.
-  const mirrorCell = el('div', '');
-  mirrorCell.appendChild(el('div', 'fact-k', 'Зеркало'));
-  const mirrorValue = el('div', 'fact-v num', sys.mirror_enabled ? 'включено' : 'выключено');
-  mirrorCell.appendChild(mirrorValue);
-  if (sys.mirror_enabled) {
-    const refreshRow = el('div', '');
-    refreshRow.style.marginTop = 'var(--s-1)';
-    const refreshBtn = el('button', 'btn btn-ghost btn-sm', 'Обновить сейчас');
-    refreshBtn.onclick = async () => {
-      await withLoading(refreshBtn, async () => {
-        try {
-          const mirror = await api('/subs/' + sub.slug + '/mirror', { method: 'POST', body: '{}' });
-          const when = mirror && mirror.updated_at ? new Date(mirror.updated_at).toLocaleString() : new Date().toLocaleTimeString();
-          mirrorValue.textContent = (mirror && mirror.url ? mirror.url : 'включено') + ', обновлено ' + when;
-          mirrorValue.classList.add('copyable');
-          showToast('Зеркало обновлено');
-        } catch (e) { showToast('Ошибка зеркала: ' + e.message, 'error'); }
-      });
-    };
-    refreshRow.appendChild(refreshBtn);
-    mirrorCell.appendChild(refreshRow);
-  }
-  facts.appendChild(mirrorCell);
-
-  // Linked instances and the actions that change them.
-  const compCell = el('div', '');
-  compCell.appendChild(el('div', 'fact-k', 'Инстансы в подписке'));
-  const compValue = el('div', 'fact-v num', linked.length ? linked.join(', ') : 'нет');
-  compCell.appendChild(compValue);
-  const compRow = el('div', '');
-  compRow.style.display = 'flex';
-  compRow.style.gap = 'var(--s-1)';
-  compRow.style.marginTop = 'var(--s-1)';
-  const compositionBtn = el('button', 'btn btn-ghost btn-sm', 'Изменить состав');
-  compositionBtn.onclick = () => showManageSubInstancesModal(sub, instances, allSubs);
-  compRow.appendChild(compositionBtn);
-  compCell.appendChild(compRow);
-  facts.appendChild(compCell);
-
-  panel.appendChild(facts);
-
-  // Service detail: the open link, the slug and the delete action, which stays out
-  // of the way of the everyday buttons.
-  const more = el('details', 'more');
-  more.appendChild(el('summary', '', 'Служебное: open-ссылка, slug, удаление'));
-  const moreFacts = el('div', 'facts');
-  moreFacts.appendChild(makeFact('Ссылка /open', openURL));
-  moreFacts.appendChild(makeFact('Slug', sub.slug));
-  const delCell = el('div', '');
-  delCell.appendChild(el('div', 'fact-k', 'Удаление'));
-  const delRow = el('div', 'fact-v');
-  const delBtn = el('button', 'btn btn-danger btn-sm', 'Удалить подписку');
+  const delBtn = el('button', 'btn btn-danger btn-sm btn-icon');
+  delBtn.setAttribute('aria-label', 'Удалить подписку');
+  delBtn.title = 'Удалить';
+  delBtn.innerHTML = icon('trash-2');
   delBtn.onclick = async () => {
     const ok = await showConfirm({
       title: 'Удалить подписку «' + sub.name + '»?',
@@ -1727,13 +1181,14 @@ function renderSubRow(sub, instances, sys, allSubs, memberships) {
       render();
     } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
   };
-  delRow.appendChild(delBtn);
-  delCell.appendChild(delRow);
-  moreFacts.appendChild(delCell);
-  more.appendChild(moreFacts);
-  panel.appendChild(more);
-
-  return panel;
+  right.appendChild(viewBtn);
+  right.appendChild(compositionBtn);
+  right.appendChild(qrBtn);
+  right.appendChild(linkBtn);
+  right.appendChild(delBtn);
+  row.appendChild(left);
+  row.appendChild(right);
+  return row;
 }
 
 function buildSubscriptionBundle(sub, subURL, mirror) {
@@ -2940,11 +2395,11 @@ function showQRModal(uri, inst) {
   }, 50);
 }
 
-// The form itself, without a shell: the modal and /instances/new mount the same
-// node, so fields, handlers and the request body cannot drift apart. The caller
-// supplies the frame, the buttons and what to do after success.
-function buildCreateInstanceForm() {
+function showCreateInstanceModal() {
   const div = el('div', '');
+  const titleRow = el('div', 'flex items-center gap-2 mb-4');
+  titleRow.innerHTML = '<span style="color: var(--color-primary)">' + icon('plus', 18) + '</span><h3 class="text-lg font-semibold">Создать инстанс</h3>';
+  div.appendChild(titleRow);
 
   const connectionSec = el('div', 'section mb-3');
   const connTitle = el('div', 'section-title flex items-center gap-1.5');
@@ -3207,20 +2662,30 @@ function buildCreateInstanceForm() {
     if (carrierField.input.value === 'openflux') updateVisibility();
   });
 
-  // No footer and no overlay here: the modal puts its own buttons under this
-  // node, the page puts the mockup's footer, and both call submit().
-  async function submit(triggerBtn) {
+  // Footer
+  const btnRow = el('div', 'flex gap-2 justify-end mt-2');
+  const cancelBtn = el('button', 'btn btn-secondary');
+  cancelBtn.textContent = 'Отмена';
+  const createBtn = el('button', 'btn btn-primary');
+  createBtn.textContent = 'Создать инстанс';
+  btnRow.appendChild(cancelBtn);
+  btnRow.appendChild(createBtn);
+  div.appendChild(btnRow);
+
+  const overlay = showModal(div);
+  cancelBtn.onclick = () => closeModal(overlay);
+  createBtn.onclick = async () => {
     const carrier = carrierField.input.value;
     const room = roomIDField.input.value.trim();
     const t = transportField.input.value;
     if (carrier === 'wbstream' && !room) {
       showToast('Для wbstream нужно указать Room ID', 'error');
-      return false;
+      return;
     }
     const autoOk = (t === 'cups' || t === 'cupsonline' || t === 'avito') && (!room || room === 'auto');
     if (carrier === 'openflux' && !autoOk && (!room || (!room.startsWith('http://') && !room.startsWith('https://')))) {
       showToast('Для OpenFlux укажите полную ссылку на документ (https://...)', 'error');
-      return false;
+      return;
     }
     const body = {
       carrier,
@@ -3251,44 +2716,14 @@ function buildCreateInstanceForm() {
         if (b24ChatField.input.value.trim()) body.b24_chat_id = b24ChatField.input.value.trim();
       }
     }
-    let created = false;
-    await withLoading(triggerBtn, async () => {
+    await withLoading(createBtn, async () => {
       try {
         await api('/instances', { method: 'POST', body: JSON.stringify(body) });
         showToast('Инстанс создан');
-        created = true;
+        closeModal(overlay);
+        render();
       } catch (e) { showToast('Не удалось создать инстанс: ' + e.message, 'error'); }
     });
-    return created;
-  }
-
-  // Only the node and the submit: the modal is the one frame that mounts this
-  // form now, so no describe/setCarrier plumbing is left behind.
-  return { node: div, submit };
-}
-
-function showCreateInstanceModal() {
-  const form = buildCreateInstanceForm();
-  const div = el('div', '');
-  const titleRow = el('div', 'flex items-center gap-2 mb-4');
-  titleRow.innerHTML = '<span style="color: var(--color-primary)">' + icon('plus', 18) + '</span><h3 class="text-lg font-semibold">Создать инстанс</h3>';
-  div.appendChild(titleRow);
-  div.appendChild(form.node);
-
-  const btnRow = el('div', 'flex gap-2 justify-end mt-2');
-  const cancelBtn = el('button', 'btn btn-secondary', 'Отмена');
-  const createBtn = el('button', 'btn btn-primary', 'Создать инстанс');
-  btnRow.appendChild(cancelBtn);
-  btnRow.appendChild(createBtn);
-  div.appendChild(btnRow);
-
-  const overlay = showModal(div);
-  cancelBtn.onclick = () => closeModal(overlay);
-  createBtn.onclick = async () => {
-    if (await form.submit(createBtn)) {
-      closeModal(overlay);
-      render();
-    }
   };
 }
 

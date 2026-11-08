@@ -299,14 +299,7 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := staticFS.ReadFile("static" + path)
 	if err != nil {
-		// Fallback to index.html for SPA routing, but only for a route: a missing
-		// asset has to answer 404. Serving index.html for a lost stylesheet or
-		// font hides the mistake, because the browser gets HTML with a 200 and
-		// silently drops the file.
-		if ext := strings.TrimPrefix(filepath.Ext(path), "."); ext != "" && ext != "html" {
-			http.Error(w, "Not Found", http.StatusNotFound)
-			return
-		}
+		// Fallback to index.html for SPA routing.
 		data, err = staticFS.ReadFile("static/index.html")
 		if err != nil {
 			http.Error(w, "Not Found", http.StatusNotFound)
@@ -324,17 +317,6 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 		contentType = "text/css; charset=utf-8"
 	case strings.HasSuffix(path, ".ico"):
 		contentType = "image/x-icon"
-	// The panel serves its own typefaces: a browser refuses to decode a font it
-	// was handed as text/plain, and the whole point of shipping the woff2 files
-	// is that the panel does not depend on a font CDN.
-	case strings.HasSuffix(path, ".woff2"):
-		contentType = "font/woff2"
-	case strings.HasSuffix(path, ".woff"):
-		contentType = "font/woff"
-	case strings.HasSuffix(path, ".svg"):
-		contentType = "image/svg+xml"
-	case strings.HasSuffix(path, ".png"):
-		contentType = "image/png"
 	}
 	w.Header().Set("Content-Type", contentType)
 	_, _ = w.Write(data)
