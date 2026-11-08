@@ -317,6 +317,17 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 		contentType = "text/css; charset=utf-8"
 	case strings.HasSuffix(path, ".ico"):
 		contentType = "image/x-icon"
+	// The panel serves its own typefaces: a browser refuses to decode a font it
+	// was handed as text/plain, and the whole point of shipping the woff2 files
+	// is that the panel does not depend on a font CDN.
+	case strings.HasSuffix(path, ".woff2"):
+		contentType = "font/woff2"
+	case strings.HasSuffix(path, ".woff"):
+		contentType = "font/woff"
+	case strings.HasSuffix(path, ".svg"):
+		contentType = "image/svg+xml"
+	case strings.HasSuffix(path, ".png"):
+		contentType = "image/png"
 	}
 	w.Header().Set("Content-Type", contentType)
 	_, _ = w.Write(data)
