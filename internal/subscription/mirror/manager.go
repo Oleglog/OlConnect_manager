@@ -12,11 +12,14 @@ import (
     "errors"
     "fmt"
     "io"
+    "net"
     "net/http"
     "net/url"
     "path"
     "strings"
     "time"
+
+    "golang.org/x/net/proxy"
 )
 
 // Config controls encrypted mirror publishing.
@@ -25,6 +28,11 @@ type Config struct {
     Provider string
     OAuthToken string
     BasePath string
+    // Proxy is the SOCKS5 (or socks5h://) proxy mirror requests go through,
+    // e.g. 127.0.0.1:40000. cloud-api.yandex.net does not answer the server's
+    // direct egress on the stand: without a proxy every upload dies with
+    // "context deadline exceeded" and the reason never reaches the operator.
+    Proxy string
 }
 
 // Result describes a published mirror.
@@ -43,7 +51,40 @@ type Manager struct {
 func New(cfg Config) *Manager {
     if cfg.Provider == "" { cfg.Provider = "yandex_disk" }
     if cfg.BasePath == "" { cfg.BasePath = "/olcrtc/subscriptions" }
-    return &Manager{cfg: cfg, client: &http.Client{Timeout: 30 * time.Second}}
+    return &Manager{cfg: cfg, client: &http.Client{Timeout: 30 * time.Second, Transport: proxyTransport(cfg.Proxy)}}
+}
+
+// proxyTransport builds the client transport for uploads: through the given
+// SOCKS5 proxy, or the default transport when none is configured. A proxy that
+// cannot be parsed leaves the default in place; Publish reports the timeout
+// with a hint then, instead of failing silently.
+func proxyTransport(proxyAddr string) http.RoundTripper {
+    proxyAddr = strings.TrimSpace(proxyAddr)
+    proxyAddr = strings.TrimPrefix(strings.TrimPrefix(proxyAddr, "socks5h://"), "socks5://")
+    if proxyAddr == "" { return nil }
+    dialer, err := socks5Dialer(proxyAddr)
+    if err != nil { return nil }
+    return &http.Transport{
+        DialContext:           dialer.DialContext,
+        TLSHandshakeTimeout:   10 * time.Second,
+        ResponseHeaderTimeout: 20 * time.Second,
+    }
+}
+
+// socks5Dialer is split out so the address handling has a test.
+func socks5Dialer(addr string) (proxy.ContextDialer, error) {
+    d, err := proxy.SOCKS5("tcp", addr, nil, &net.Dialer{Timeout: 10 * time.Second})
+    if err != nil { return nil, err }
+    cd, ok := d.(proxy.ContextDialer)
+    if !ok { return nil, errors.New("socks5 dialer has no DialContext") }
+    return cd, nil
+}
+
+// proxyHint explains a failed upload that had no proxy to go through: the
+// carrier of this failure is a timeout, and the cause is the blocked egress.
+func (m *Manager) proxyHint(err error) error {
+    if err == nil || strings.TrimSpace(m.cfg.Proxy) != "" { return err }
+    return fmt.Errorf("%w (OLCRTC_SUB_MIRROR_PROXY is empty: cloud-api.yandex.net is unreachable over the direct egress here)", err)
 }
 
 func (m *Manager) Enabled() bool { return m != nil && m.cfg.Enabled && m.cfg.Provider == "yandex_disk" && m.cfg.OAuthToken != "" }
@@ -85,13 +126,13 @@ func (m *Manager) Publish(ctx context.Context, slug string, lines []string, keyB
     if err != nil { return "", err }
     filePath := path.Join(m.cfg.BasePath, slug+".json")
     if !strings.HasPrefix(filePath, "/") { filePath = "/" + filePath }
-    if err := m.ensureDirs(ctx, path.Dir(filePath)); err != nil { return "", err }
+    if err := m.ensureDirs(ctx, path.Dir(filePath)); err != nil { return "", m.proxyHint(err) }
     href, err := m.uploadHref(ctx, filePath)
-    if err != nil { return "", err }
-    if err := m.put(ctx, href, data); err != nil { return "", err }
-    if err := m.publishPath(ctx, filePath); err != nil { return "", err }
+    if err != nil { return "", m.proxyHint(err) }
+    if err := m.put(ctx, href, data); err != nil { return "", m.proxyHint(err) }
+    if err := m.publishPath(ctx, filePath); err != nil { return "", m.proxyHint(err) }
     publicURL, err := m.publicURL(ctx, filePath)
-    if err != nil { return "", err }
+    if err != nil { return "", m.proxyHint(err) }
     return publicURL, nil
 }
 

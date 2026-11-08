@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/openlibrecommunity/olcrtc/internal/logger"
 )
 
 func (s *Server) handleSubs(w http.ResponseWriter, r *http.Request) {
@@ -126,11 +128,15 @@ func (s *Server) removeLinkedSubscriptionInstance(id int) ([]string, int64, erro
 		return nil, 0, fmt.Errorf("subscription cleanup status %d: %s", resp.StatusCode, strings.TrimSpace(string(message)))
 	}
 	var result struct {
-		Removed int64    `json:"removed_instances"`
-		Updated []string `json:"updated_subscriptions"`
+		Removed      int64             `json:"removed_instances"`
+		Updated      []string          `json:"updated_subscriptions"`
+		MirrorErrors map[string]string `json:"mirror_errors"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, 0, err
+	}
+	for slug, msg := range result.MirrorErrors {
+		logger.Warnf("remove-linked: subscription %s mirror not removed: %s", slug, msg)
 	}
 	return result.Updated, result.Removed, nil
 }
@@ -166,7 +172,31 @@ func (s *Server) refreshLinkedSubscriptionInstance(id int, uri string) error {
 		message, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("subscription refresh status %d: %s", resp.StatusCode, strings.TrimSpace(string(message)))
 	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	warnMirrorErrors("refresh-linked", body)
 	return nil
+}
+
+// parseMirrorErrors pulls the per-subscription mirror failures out of a
+// subscription backend reply. The backend keeps serving the bundle when a
+// mirror upload fails, so the reply is a success with mirror_errors filled in -
+// and that is exactly the case an operator has to hear about: the phone still
+// gets the list, its Yandex mirror does not.
+func parseMirrorErrors(body []byte) map[string]string {
+	var reply struct {
+		MirrorErrors map[string]string `json:"mirror_errors"`
+	}
+	if len(body) == 0 || json.Unmarshal(body, &reply) != nil {
+		return nil
+	}
+	return reply.MirrorErrors
+}
+
+func warnMirrorErrors(what string, body []byte) {
+	errs := parseMirrorErrors(body)
+	for slug, msg := range errs {
+		logger.Warnf("%s: subscription %s mirror not updated: %s", what, slug, msg)
+	}
 }
 
 func (s *Server) doProxy(w http.ResponseWriter, req *http.Request) {
