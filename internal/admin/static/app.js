@@ -317,7 +317,12 @@ function render() {
   if (path === '/login') {
     renderLogin(app);
   } else {
-    // /instances/<id> is the instance page; everything else is a section.
+    // /instances/new and /instances/<id> are pages of their own; everything else
+    // is a section.
+    if (path === '/instances/new') {
+      renderInstanceCreatePage(app);
+      return;
+    }
     const instanceMatch = path.match(/^\/instances\/(\d+)$/);
     if (instanceMatch) {
       renderInstancePage(app, Number(instanceMatch[1]));
@@ -595,7 +600,7 @@ function renderInstancesHead(instances, memberships) {
   return {
     title: 'Инстансы',
     sub,
-    action: makePrimaryButton('Добавить', () => showCreateInstanceModal()),
+    action: makePrimaryButton('Добавить', () => route('/instances/new')),
   };
 }
 
@@ -993,6 +998,141 @@ function peersWord(count) {
 
 // A channel row, structurally identical to the mockup:
 // row > [ row-id + row-sub | chan ( state + rail + rail-label ) | row-metric | row-actions ]
+// The create screen as a route, transplanted from ofx-design/admin-instance-new.html:
+// the same head, the carrier tiles, the panels and the footer. The fields are the
+// modal's own builder, so nothing can drift and the modal keeps working.
+const CARRIER_TITLES = {
+  jitsi: 'Jitsi',
+  telemost: 'Telemost',
+  wbstream: 'WB Stream',
+  openflux: 'OpenFlux',
+};
+
+async function renderInstanceCreatePage(app) {
+  const frame = renderShell('instances');
+  const form = buildCreateInstanceForm();
+
+  const head = el('div', 'head');
+  const left = el('div', '');
+  const backBtn = el('button', 'btn btn-ghost btn-sm');
+  backBtn.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg>Все инстансы';
+  backBtn.style.marginBottom = 'var(--s-2)';
+  backBtn.onclick = () => route('/instances');
+  left.appendChild(backBtn);
+  left.appendChild(el('h1', '', 'Новый инстанс'));
+  left.appendChild(el('p', 'sub', 'Один инстанс, один канал через чужую инфраструктуру'));
+  head.appendChild(left);
+  frame.main.appendChild(head);
+
+  const body = el('div', 'body');
+  body.style.maxWidth = '760px';
+
+  // Panel 1: the carriers as tiles, as the mockup draws them.
+  const carrierPanel = el('section', 'panel');
+  const carrierHead = el('div', 'panel-head');
+  carrierHead.appendChild(el('h2', '', 'Носитель'));
+  carrierHead.appendChild(el('span', 'hint', 'определяет, какой транспорт поднимется'));
+  carrierPanel.appendChild(carrierHead);
+  const pickWrap = el('div', '');
+  pickWrap.style.padding = 'var(--s-4)';
+  const pick = el('div', 'pick');
+  pick.setAttribute('role', 'group');
+  pick.setAttribute('aria-label', 'Носитель');
+  const tiles = new Map();
+  form.carrierOptions.forEach(carrier => {
+    const tile = el('button');
+    tile.type = 'button';
+    tile.appendChild(el('b', '', CARRIER_TITLES[carrier] || carrier));
+    tile.appendChild(el('span', '', carrier));
+    tile.setAttribute('aria-pressed', 'false');
+    tile.onclick = () => {
+      form.setCarrier(carrier);
+      syncTiles();
+      syncFacts();
+    };
+    tiles.set(carrier, tile);
+    pick.appendChild(tile);
+  });
+  function syncTiles() {
+    const current = form.describe().carrier;
+    tiles.forEach((tile, carrier) => {
+      tile.setAttribute('aria-pressed', carrier === current ? 'true' : 'false');
+    });
+  }
+  pickWrap.appendChild(pick);
+  carrierPanel.appendChild(pickWrap);
+  body.appendChild(carrierPanel);
+
+  // Panel 2: the form itself. Same node the modal mounts.
+  const formPanel = el('section', 'panel');
+  const formHead = el('div', 'panel-head');
+  formHead.appendChild(el('h2', '', 'Подключение'));
+  formPanel.appendChild(formHead);
+  const formWrap = el('div', '');
+  formWrap.style.padding = 'var(--s-4)';
+  formWrap.appendChild(form.node);
+  formPanel.appendChild(formWrap);
+  body.appendChild(formPanel);
+
+  // Panel 3: what will appear, as far as it is knowable before the id exists.
+  const summaryPanel = el('section', 'panel');
+  const summaryHead = el('div', 'panel-head');
+  summaryHead.appendChild(el('h2', '', 'Что появится'));
+  summaryPanel.appendChild(summaryHead);
+  const summaryFacts = el('div', 'facts');
+  const carrierFact = el('div', '');
+  carrierFact.appendChild(el('div', 'fact-k', 'Носитель'));
+  const carrierValue = el('div', 'fact-v num');
+  carrierFact.appendChild(carrierValue);
+  const transportFact = el('div', '');
+  transportFact.appendChild(el('div', 'fact-k', 'Транспорт'));
+  const transportValue = el('div', 'fact-v num');
+  transportFact.appendChild(transportValue);
+  const nameFact = el('div', '');
+  nameFact.appendChild(el('div', 'fact-k', 'Имя в панели'));
+  const nameValue = el('div', 'fact-v num');
+  nameFact.appendChild(nameValue);
+  summaryFacts.appendChild(carrierFact);
+  summaryFacts.appendChild(transportFact);
+  summaryFacts.appendChild(nameFact);
+  summaryPanel.appendChild(summaryFacts);
+
+  function syncFacts() {
+    const d = form.describe();
+    carrierValue.textContent = CARRIER_TITLES[d.carrier] || d.carrier || '-';
+    transportValue.textContent = d.transport || '-';
+    nameValue.textContent = d.name || '-';
+  }
+
+  const footer = el('div', '');
+  footer.style.display = 'flex';
+  footer.style.justifyContent = 'flex-end';
+  footer.style.gap = 'var(--s-2)';
+  footer.style.padding = 'var(--s-4)';
+  footer.style.borderTop = '1px solid var(--line)';
+  const cancelBtn = el('button', 'btn btn-ghost', 'Отмена');
+  cancelBtn.onclick = () => route('/instances');
+  const createBtn = el('button', 'btn btn-primary', 'Создать инстанс');
+  createBtn.onclick = async () => {
+    if (await form.submit(createBtn)) route('/instances');
+  };
+  footer.appendChild(cancelBtn);
+  footer.appendChild(createBtn);
+  summaryPanel.appendChild(footer);
+
+  body.appendChild(summaryPanel);
+  frame.main.appendChild(body);
+
+  // Carrier, transport and name change under the tiles and the facts, so the
+  // summary follows the form without polling.
+  form.node.addEventListener('change', () => { syncTiles(); syncFacts(); });
+  form.node.addEventListener('input', () => { syncFacts(); });
+  syncTiles();
+  syncFacts();
+
+  app.appendChild(frame.shell);
+}
+
 function renderInstanceCard(inst, context = {}) {
   const row = el('div', 'row');
   const displayName = (inst.carrier === 'openflux' && inst.name) ? inst.name : (context.displayName || inst.name || inst.label);
@@ -2796,11 +2936,11 @@ function showQRModal(uri, inst) {
   }, 50);
 }
 
-function showCreateInstanceModal() {
+// The form itself, without a shell: the modal and /instances/new mount the same
+// node, so fields, handlers and the request body cannot drift apart. The caller
+// supplies the frame, the buttons and what to do after success.
+function buildCreateInstanceForm() {
   const div = el('div', '');
-  const titleRow = el('div', 'flex items-center gap-2 mb-4');
-  titleRow.innerHTML = '<span style="color: var(--color-primary)">' + icon('plus', 18) + '</span><h3 class="text-lg font-semibold">Создать инстанс</h3>';
-  div.appendChild(titleRow);
 
   const connectionSec = el('div', 'section mb-3');
   const connTitle = el('div', 'section-title flex items-center gap-1.5');
@@ -3063,30 +3203,20 @@ function showCreateInstanceModal() {
     if (carrierField.input.value === 'openflux') updateVisibility();
   });
 
-  // Footer
-  const btnRow = el('div', 'flex gap-2 justify-end mt-2');
-  const cancelBtn = el('button', 'btn btn-secondary');
-  cancelBtn.textContent = 'Отмена';
-  const createBtn = el('button', 'btn btn-primary');
-  createBtn.textContent = 'Создать инстанс';
-  btnRow.appendChild(cancelBtn);
-  btnRow.appendChild(createBtn);
-  div.appendChild(btnRow);
-
-  const overlay = showModal(div);
-  cancelBtn.onclick = () => closeModal(overlay);
-  createBtn.onclick = async () => {
+  // No footer and no overlay here: the modal puts its own buttons under this
+  // node, the page puts the mockup's footer, and both call submit().
+  async function submit(triggerBtn) {
     const carrier = carrierField.input.value;
     const room = roomIDField.input.value.trim();
     const t = transportField.input.value;
     if (carrier === 'wbstream' && !room) {
       showToast('Для wbstream нужно указать Room ID', 'error');
-      return;
+      return false;
     }
     const autoOk = (t === 'cups' || t === 'cupsonline' || t === 'avito') && (!room || room === 'auto');
     if (carrier === 'openflux' && !autoOk && (!room || (!room.startsWith('http://') && !room.startsWith('https://')))) {
       showToast('Для OpenFlux укажите полную ссылку на документ (https://...)', 'error');
-      return;
+      return false;
     }
     const body = {
       carrier,
@@ -3117,14 +3247,59 @@ function showCreateInstanceModal() {
         if (b24ChatField.input.value.trim()) body.b24_chat_id = b24ChatField.input.value.trim();
       }
     }
-    await withLoading(createBtn, async () => {
+    let created = false;
+    await withLoading(triggerBtn, async () => {
       try {
         await api('/instances', { method: 'POST', body: JSON.stringify(body) });
         showToast('Инстанс создан');
-        closeModal(overlay);
-        render();
+        created = true;
       } catch (e) { showToast('Не удалось создать инстанс: ' + e.message, 'error'); }
     });
+    return created;
+  }
+
+  // What the chosen combination will produce, as far as it is knowable before the
+  // server assigns an id: carrier, transport and the name that will be stored.
+  function describe() {
+    return {
+      carrier: carrierField.input.value,
+      transport: transportField.input.value,
+      name: nameField.input.value,
+    };
+  }
+
+  // The page shows the carriers as tiles, the modal as a select. Both drive the
+  // same field, so there is one source of truth for the choice.
+  function setCarrier(value) {
+    carrierField.input.value = value;
+    carrierField.input.dispatchEvent(new Event('change'));
+  }
+
+  return { node: div, submit, describe, setCarrier, carrierOptions: ['jitsi', 'telemost', 'wbstream', 'openflux'] };
+}
+
+function showCreateInstanceModal() {
+  const form = buildCreateInstanceForm();
+  const div = el('div', '');
+  const titleRow = el('div', 'flex items-center gap-2 mb-4');
+  titleRow.innerHTML = '<span style="color: var(--color-primary)">' + icon('plus', 18) + '</span><h3 class="text-lg font-semibold">Создать инстанс</h3>';
+  div.appendChild(titleRow);
+  div.appendChild(form.node);
+
+  const btnRow = el('div', 'flex gap-2 justify-end mt-2');
+  const cancelBtn = el('button', 'btn btn-secondary', 'Отмена');
+  const createBtn = el('button', 'btn btn-primary', 'Создать инстанс');
+  btnRow.appendChild(cancelBtn);
+  btnRow.appendChild(createBtn);
+  div.appendChild(btnRow);
+
+  const overlay = showModal(div);
+  cancelBtn.onclick = () => closeModal(overlay);
+  createBtn.onclick = async () => {
+    if (await form.submit(createBtn)) {
+      closeModal(overlay);
+      render();
+    }
   };
 }
 
