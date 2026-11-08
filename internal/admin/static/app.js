@@ -493,16 +493,21 @@ async function renderDashboard(app, section) {
   }
 
   panelVersion = sys.version || '';
-  const head = renderPageHead(section, section === 'instances'
-    ? renderInstancesHead(instances, instanceMemberships)
-    : { title: SECTION_TITLES[section] || '', sub: '', action: null });
-  main.appendChild(head);
+  let headParts;
+  if (section === 'instances') {
+    headParts = renderInstancesHead(instances, instanceMemberships);
+  } else if (section === 'subscriptions') {
+    headParts = renderSubscriptionsHead(subs, subsError);
+  } else {
+    headParts = { title: SECTION_TITLES[section] || '', sub: '', action: null };
+  }
+  main.appendChild(renderPageHead(section, headParts));
 
   const bodyEl = el('div', 'body');
   if (section === 'instances') {
     renderInstancesBlock(bodyEl, instances, instanceMemberships);
   } else if (section === 'subscriptions') {
-    bodyEl.appendChild(renderSubscriptionsBlock(subs, subsError, instances, sys));
+    renderSubscriptionsBlock(bodyEl, subs, subsError, instances, sys, instanceMemberships);
   } else {
     bodyEl.appendChild(renderSystemBlock(sys));
   }
@@ -621,16 +626,31 @@ function renderInstancesBlock(container, instances, instanceMemberships) {
   return container;
 }
 
-function renderSubscriptionsBlock(subs, subsError, instances, sys) {
-  const subSection = el('div', 'card p-4');
-  const subHeader = el('div', 'flex items-center justify-between mb-4');
-  subHeader.innerHTML = '<h2 class="text-lg font-semibold">Подписки</h2>';
-  const subActions = el('div', 'flex gap-2 flex-wrap');
-  const addSubBtn = el('button', 'btn btn-primary btn-sm');
-  addSubBtn.innerHTML = icon('plus') + '<span>Создать</span>';
-  addSubBtn.onclick = () => showCreateSubModal();
-  const exportBtn = el('button', 'btn btn-secondary btn-sm');
-  exportBtn.innerHTML = icon('download') + '<span>Экспорт</span>';
+function pluralSubscriptions(count) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'подписка';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'подписки';
+  return 'подписок';
+}
+
+// .head of the subscriptions screen: what exists and the one primary action, with
+// export and import as secondary controls beside it.
+function renderSubscriptionsHead(subs, subsError) {
+  const list = Array.isArray(subs) ? subs : [];
+  let sub = '';
+  if (subsError) {
+    sub = 'сервис подписок недоступен';
+  } else if (list.length === 0) {
+    sub = 'подписок пока нет';
+  } else {
+    sub = list.length + ' ' + pluralSubscriptions(list.length);
+  }
+  const actions = el('div', '');
+  actions.style.display = 'flex';
+  actions.style.gap = 'var(--s-2)';
+  actions.style.flexWrap = 'wrap';
+  const exportBtn = el('button', 'btn btn-ghost', 'Экспорт');
   exportBtn.onclick = async () => {
     await withLoading(exportBtn, async () => {
       try {
@@ -644,25 +664,42 @@ function renderSubscriptionsBlock(subs, subsError, instances, sys) {
       } catch (e) { showToast('Ошибка экспорта: ' + e.message, 'error'); }
     });
   };
-  const importBtn = el('button', 'btn btn-secondary btn-sm');
-  importBtn.textContent = 'Импорт';
+  const importBtn = el('button', 'btn btn-ghost', 'Импорт');
   importBtn.onclick = () => showImportSubModal();
-  subActions.appendChild(addSubBtn);
-  subActions.appendChild(exportBtn);
-  subActions.appendChild(importBtn);
-  subHeader.appendChild(subActions);
-  subSection.appendChild(subHeader);
+  actions.appendChild(exportBtn);
+  actions.appendChild(importBtn);
+  actions.appendChild(makePrimaryButton('Создать', () => showCreateSubModal()));
+  return { title: 'Подписки', sub, action: actions };
+}
 
-  const subList = el('div', 'space-y-3');
+// One panel per subscription, the same shape as the instances panel: head, facts,
+// and the service detail behind the disclosure.
+function renderSubscriptionsBlock(container, subs, subsError, instances, sys, memberships) {
   if (subsError) {
-    subList.appendChild(el('div', 'text-amber-300 text-sm', 'Сервис подписок недоступен. Проверьте, что olcrtc-server запущен с OLCRTC_SUB_ENABLED=1.'));
-  } else if (!subs || subs.length === 0) {
-    subList.appendChild(el('div', 'text-gray-400 text-sm', 'Нет подписок'));
-  } else {
-    subs.forEach(sub => subList.appendChild(renderSubRow(sub, instances, sys, subs)));
+    const panel = el('section', 'panel');
+    const head = el('div', 'panel-head');
+    head.appendChild(el('h2', '', 'Сервис подписок недоступен'));
+    panel.appendChild(head);
+    const facts = el('div', 'facts');
+    facts.appendChild(el('div', 'fact-v', 'Проверьте, что olcrtc-server запущен с OLCRTC_SUB_ENABLED=1.'));
+    panel.appendChild(facts);
+    container.appendChild(panel);
+    return container;
   }
-  subSection.appendChild(subList);
-  return subSection;
+  const list = Array.isArray(subs) ? subs : [];
+  if (list.length === 0) {
+    const panel = el('section', 'panel');
+    const head = el('div', 'panel-head');
+    head.appendChild(el('h2', '', 'Подписок нет'));
+    panel.appendChild(head);
+    const facts = el('div', 'facts');
+    facts.appendChild(el('div', 'fact-v', 'Создайте первую подписку кнопкой «Создать» в шапке.'));
+    panel.appendChild(facts);
+    container.appendChild(panel);
+    return container;
+  }
+  list.forEach(sub => container.appendChild(renderSubRow(sub, instances, sys, list, memberships)));
+  return container;
 }
 
 function stopUsagePolling() {
@@ -1650,26 +1687,61 @@ function metaRow(label, value, copyValue) {
   return row;
 }
 
-function renderSubRow(sub, instances, sys, allSubs) {
-  const row = el('div', 'card p-3 flex flex-col md:flex-row md:items-center justify-between gap-2');
+function renderSubRow(sub, instances, sys, allSubs, memberships) {
+  const panel = el('section', 'panel');
   const subBase = (sys.subscription_public_url || sys.admin_url || location.origin).replace(/\/+$/, '');
   const subURL = subBase + '/sub/' + sub.slug;
   const openURL = subURL + '/open';
-  const left = el('div', 'flex-1 min-w-0');
-  left.innerHTML = `
-    <div class="font-medium">${sub.name} <span class="text-gray-500">[${sub.slug}]</span></div>
-    <div class="text-gray-400 text-xs mt-1 copyable truncate" title="${subURL}">${subURL}</div>
-    <div class="text-gray-500 text-xs mt-1 copyable truncate" title="${openURL}">Обычная ссылка: ${openURL}</div>
-  `;
-  const right = el('div', 'flex gap-1.5 flex-wrap');
-  const viewBtn = el('button', 'btn btn-secondary btn-sm');
-  viewBtn.innerHTML = icon('eye') + '<span>Просмотр</span>';
+
+  // Which instances of this subscription are linked, from the memberships the
+  // dashboard already fetched: no extra request per row.
+  const linked = [];
+  (memberships || []).forEach(group => {
+    if (!group || !group.subscription || group.subscription.slug !== sub.slug) return;
+    (group.entries || []).forEach(entry => {
+      if (entry.source_instance_id === null || entry.source_instance_id === undefined) return;
+      const inst = (instances || []).find(item => String(item.id) === String(entry.source_instance_id));
+      if (inst) linked.push(instanceDisplayName(inst));
+    });
+  });
+
+  const head = el('div', 'panel-head');
+  head.appendChild(el('h2', '', sub.name + ' [' + sub.slug + ']'));
+  const hintBits = [];
+  if (linked.length) hintBits.push(linked.length + ' ' + pluralInstances(linked.length));
+  hintBits.push(sys.mirror_enabled ? 'зеркало включено' : 'зеркало выключено');
+  head.appendChild(el('span', 'hint', hintBits.join(', ')));
+  panel.appendChild(head);
+
+  const facts = el('div', 'facts');
+
+  // Public URL: readable and copyable, the thing people hand out.
+  const urlCell = el('div', '');
+  urlCell.appendChild(el('div', 'fact-k', 'Публичная ссылка'));
+  const urlRow = el('div', 'fact-v num');
+  const urlText = el('span', 'copyable', subURL);
+  urlText.title = subURL;
+  urlRow.appendChild(urlText);
+  urlCell.appendChild(urlRow);
+  const urlActions = el('div', '');
+  urlActions.style.display = 'flex';
+  urlActions.style.gap = 'var(--s-1)';
+  urlActions.style.marginTop = 'var(--s-1)';
+  const copyBtn = el('button', 'btn btn-ghost btn-sm', 'Скопировать');
+  copyBtn.onclick = () => { navigator.clipboard.writeText(subURL); showToast('Ссылка скопирована'); };
+  const viewBtn = el('button', 'btn btn-ghost btn-sm', 'Открыть');
   viewBtn.onclick = () => window.open(subURL, '_blank');
-  const compositionBtn = el('button', 'btn btn-secondary btn-sm');
-  compositionBtn.innerHTML = icon('settings') + '<span>Состав</span>';
-  compositionBtn.onclick = () => showManageSubInstancesModal(sub, instances, allSubs);
-  const qrBtn = el('button', 'btn btn-secondary btn-sm');
-  qrBtn.innerHTML = icon('qr-code') + '<span>QR</span>';
+  urlActions.appendChild(copyBtn);
+  urlActions.appendChild(viewBtn);
+  urlCell.appendChild(urlActions);
+  facts.appendChild(urlCell);
+
+  // QR and the bootstrap link: both need the mirror, so one button reports the
+  // mirror state and the other copies the encrypted entry point.
+  const qrCell = el('div', '');
+  qrCell.appendChild(el('div', 'fact-k', 'QR и прямая ссылка'));
+  const qrRow = el('div', 'fact-v');
+  const qrBtn = el('button', 'btn btn-ghost btn-sm', 'QR');
   qrBtn.title = 'QR подписки: URL + encrypted mirror';
   qrBtn.onclick = async () => {
     await withLoading(qrBtn, async () => {
@@ -1689,8 +1761,7 @@ function renderSubRow(sub, instances, sys, allSubs) {
       }
     });
   };
-  const linkBtn = el('button', 'btn btn-secondary btn-sm');
-  linkBtn.innerHTML = icon('link') + '<span>Ссылка</span>';
+  const linkBtn = el('button', 'btn btn-ghost btn-sm', 'Прямая ссылка');
   linkBtn.title = 'Скопировать прямую bootstrap-ссылку с ключом Yandex mirror. Передавайте только получателю подписки.';
   linkBtn.onclick = async () => {
     await withLoading(linkBtn, async () => {
@@ -1705,10 +1776,66 @@ function renderSubRow(sub, instances, sys, allSubs) {
       }
     });
   };
-  const delBtn = el('button', 'btn btn-danger btn-sm btn-icon');
-  delBtn.setAttribute('aria-label', 'Удалить подписку');
-  delBtn.title = 'Удалить';
-  delBtn.innerHTML = icon('trash-2');
+  qrRow.appendChild(qrBtn);
+  qrRow.appendChild(document.createTextNode(' '));
+  qrRow.appendChild(linkBtn);
+  qrCell.appendChild(qrRow);
+  facts.appendChild(qrCell);
+
+  // Mirror: state, address and the time of the last refresh, which is only known
+  // after a sync, so the cell starts honest and fills in when it runs.
+  const mirrorCell = el('div', '');
+  mirrorCell.appendChild(el('div', 'fact-k', 'Зеркало'));
+  const mirrorValue = el('div', 'fact-v num', sys.mirror_enabled ? 'включено' : 'выключено');
+  mirrorCell.appendChild(mirrorValue);
+  if (sys.mirror_enabled) {
+    const refreshRow = el('div', '');
+    refreshRow.style.marginTop = 'var(--s-1)';
+    const refreshBtn = el('button', 'btn btn-ghost btn-sm', 'Обновить сейчас');
+    refreshBtn.onclick = async () => {
+      await withLoading(refreshBtn, async () => {
+        try {
+          const mirror = await api('/subs/' + sub.slug + '/mirror', { method: 'POST', body: '{}' });
+          const when = mirror && mirror.updated_at ? new Date(mirror.updated_at).toLocaleString() : new Date().toLocaleTimeString();
+          mirrorValue.textContent = (mirror && mirror.url ? mirror.url : 'включено') + ', обновлено ' + when;
+          mirrorValue.classList.add('copyable');
+          showToast('Зеркало обновлено');
+        } catch (e) { showToast('Ошибка зеркала: ' + e.message, 'error'); }
+      });
+    };
+    refreshRow.appendChild(refreshBtn);
+    mirrorCell.appendChild(refreshRow);
+  }
+  facts.appendChild(mirrorCell);
+
+  // Linked instances and the actions that change them.
+  const compCell = el('div', '');
+  compCell.appendChild(el('div', 'fact-k', 'Инстансы в подписке'));
+  const compValue = el('div', 'fact-v num', linked.length ? linked.join(', ') : 'нет');
+  compCell.appendChild(compValue);
+  const compRow = el('div', '');
+  compRow.style.display = 'flex';
+  compRow.style.gap = 'var(--s-1)';
+  compRow.style.marginTop = 'var(--s-1)';
+  const compositionBtn = el('button', 'btn btn-ghost btn-sm', 'Изменить состав');
+  compositionBtn.onclick = () => showManageSubInstancesModal(sub, instances, allSubs);
+  compRow.appendChild(compositionBtn);
+  compCell.appendChild(compRow);
+  facts.appendChild(compCell);
+
+  panel.appendChild(facts);
+
+  // Service detail: the open link, the slug and the delete action, which stays out
+  // of the way of the everyday buttons.
+  const more = el('details', 'more');
+  more.appendChild(el('summary', '', 'Служебное: open-ссылка, slug, удаление'));
+  const moreFacts = el('div', 'facts');
+  moreFacts.appendChild(makeFact('Ссылка /open', openURL));
+  moreFacts.appendChild(makeFact('Slug', sub.slug));
+  const delCell = el('div', '');
+  delCell.appendChild(el('div', 'fact-k', 'Удаление'));
+  const delRow = el('div', 'fact-v');
+  const delBtn = el('button', 'btn btn-danger btn-sm', 'Удалить подписку');
   delBtn.onclick = async () => {
     const ok = await showConfirm({
       title: 'Удалить подписку «' + sub.name + '»?',
@@ -1722,14 +1849,13 @@ function renderSubRow(sub, instances, sys, allSubs) {
       render();
     } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
   };
-  right.appendChild(viewBtn);
-  right.appendChild(compositionBtn);
-  right.appendChild(qrBtn);
-  right.appendChild(linkBtn);
-  right.appendChild(delBtn);
-  row.appendChild(left);
-  row.appendChild(right);
-  return row;
+  delRow.appendChild(delBtn);
+  delCell.appendChild(delRow);
+  moreFacts.appendChild(delCell);
+  more.appendChild(moreFacts);
+  panel.appendChild(more);
+
+  return panel;
 }
 
 function buildSubscriptionBundle(sub, subURL, mirror) {
