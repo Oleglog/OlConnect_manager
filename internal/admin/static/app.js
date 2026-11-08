@@ -317,6 +317,12 @@ function render() {
   if (path === '/login') {
     renderLogin(app);
   } else {
+    // /instances/<id> is the instance page; everything else is a section.
+    const instanceMatch = path.match(/^\/instances\/(\d+)$/);
+    if (instanceMatch) {
+      renderInstancePage(app, Number(instanceMatch[1]));
+      return;
+    }
     // Default '/' opens System; deeper sections are separate viewed blocks.
     const section = path === '/' ? 'system' : path.replace(/^\//, '') || 'system';
     if (section === 'settings') {
@@ -902,8 +908,10 @@ function fmtInstanceHistory(inst) {
     runs,
     counts,
     rejects,
-    // history_complete === false is normal right after the panel restarts: the
-    // ring has not filled an hour yet, and that is not an error.
+    // One flapping episode per run of U: the page prints that as "разрывов".
+    breaks: runs.filter(run => run.cls === 's-degraded').length,
+    // history_complete === false is the normal case right after the panel
+    // restarts: the ring has not filled an hour yet. It is not an error.
     complete: inst.history_complete !== false,
   };
 }
@@ -1110,11 +1118,11 @@ function renderInstanceCard(inst, context = {}) {
   const cfgBtn = el('button', 'btn btn-ghost btn-sm');
   cfgBtn.setAttribute('aria-label', 'Настройки инстанса');
   cfgBtn.textContent = 'Конфиг';
-  // The carrier's setup hint is knowledge worth keeping (which cookies a carrier
-  // needs, what its room has to be). The row has no place for it, so it rides on
-  // the button that opens the settings.
-  cfgBtn.title = fmtTransportInfo(inst).hint || 'Настройки инстанса';
-  cfgBtn.onclick = () => showConfigModal(inst);
+  // The mockup names "Конфиг" the place where secondary things live, and the card
+  // is that place now: the row links to it. The carrier's setup hint (which
+  // cookies a carrier needs, what its room has to be) rides along as the tooltip.
+  cfgBtn.title = fmtTransportInfo(inst).hint || 'Карточка инстанса';
+  cfgBtn.onclick = () => route('/instances/' + inst.id);
   const isRunning = inst.status === 'running';
   const startStopBtn = el('button', isRunning ? 'btn btn-ghost btn-sm btn-icon' : 'btn btn-primary btn-sm btn-icon');
   startStopBtn.setAttribute('aria-label', isRunning ? 'Остановить' : 'Запустить');
@@ -1146,10 +1154,11 @@ function renderInstanceCard(inst, context = {}) {
     });
   };
   // The mockup's row carries two controls, and seven buttons made the row noisy
-  // next to a two-line channel cell. Settings and power stay visible; copy, QR,
-  // ping, restart and delete sit behind one disclosure. It is plain
-  // details/summary, so no JS state, and every handler, confirm included, is the
-  // same object it was before.
+  // next to a two-line channel cell. The client link, the card and the power
+  // switch stay visible; QR, ping, restart and delete sit behind one disclosure.
+  // It is plain details/summary, so no JS state, and every handler, confirm
+  // included, is the same object it was before.
+  actions.appendChild(uriBtn);
   actions.appendChild(cfgBtn);
   actions.appendChild(startStopBtn);
   const menu = el('details', 'row-menu');
@@ -1159,7 +1168,6 @@ function renderInstanceCard(inst, context = {}) {
   menuBtn.innerHTML = icon('chevron-down');
   menu.appendChild(menuBtn);
   const menuBody = el('div', '');
-  menuBody.appendChild(uriBtn);
   menuBody.appendChild(qrBtn);
   menuBody.appendChild(pingBtn);
   menuBody.appendChild(restartBtn);
@@ -1193,6 +1201,293 @@ function renderInstanceCard(inst, context = {}) {
   actions.appendChild(menu);
   row.appendChild(actions);
   return row;
+}
+
+// Shared by the row and the instance page: the same ping and the same QR, so the
+// two places cannot drift apart.
+async function pingInstance(inst, btn) {
+  await withLoading(btn, async () => {
+    try {
+      const res = await api('/instances/' + inst.id + '/ping', { method: 'POST' });
+      const targetLabel = ({
+        socks_proxy: 'SOCKS',
+        warp_proxy: 'WARP',
+        internet: 'интернет',
+      })[res.target_kind] || res.target_kind || 'цель';
+      if (res && res.ok) {
+        const rtt = (res.rtt_ms != null) ? res.rtt_ms.toFixed(1) + ' мс' : '';
+        const loss = (res.packet_loss != null && res.packet_loss > 0) ? ` · потери ${res.packet_loss}%` : '';
+        showToast(`${targetLabel} ${res.target} · ${rtt}${loss}`, 'success');
+      } else {
+        showToast(res.message || `Не удалось пинговать ${targetLabel}`, 'error');
+      }
+    } catch (e) {
+      showToast('Ошибка пинга: ' + e.message, 'error');
+    }
+  });
+}
+
+async function openInstanceQR(inst, displayName, btn) {
+  await withLoading(btn, async () => {
+    try {
+      const res = await api('/instances/' + inst.id + '/qr');
+      showQRModal(withInstanceName(res.uri || inst.uri, displayName), { ...inst, name: displayName });
+    } catch (e) {
+      showToast('Ошибка QR: ' + e.message, 'error');
+    }
+  });
+}
+
+// The mockup's fact block: label above value, value in the number face.
+function makeFact(label, value, opts = {}) {
+  const cell = el('div', '');
+  cell.appendChild(el('div', 'fact-k', label));
+  const cls = 'fact-v' + (opts.mono === false ? '' : ' num') + (opts.copy ? ' copyable' : '');
+  const val = el('div', cls, value);
+  if (opts.id) val.id = opts.id;
+  if (opts.title) val.title = opts.title;
+  cell.appendChild(val);
+  return cell;
+}
+
+function instanceDisplayName(inst) {
+  return (inst.carrier === 'openflux' && inst.name) ? inst.name : (inst.name || inst.label || ('#' + inst.id));
+}
+
+// The instance page, transplanted from ofx-design/admin-instance.html: the same
+// head, the same three panels, the same disclosure. showConfigModal stays the
+// form behind "Изменить"; the page does not try to be the form.
+async function renderInstancePage(app, id) {
+  const frame = renderShell('instances');
+
+  let sys = {};
+  let instances = [];
+  try { sys = await api('/system/status'); } catch (e) { console.error(e); }
+  if (sys.version) panelVersion = sys.version;
+  try { instances = await api('/instances'); } catch (e) { console.error(e); }
+  instances.forEach(instance => latestInstanceUsage.set(String(instance.id), instance));
+
+  const head = el('div', 'head');
+  const left = el('div', '');
+  const backBtn = el('button', 'btn btn-ghost btn-sm');
+  backBtn.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg>Все инстансы';
+  backBtn.style.marginBottom = 'var(--s-2)';
+  backBtn.onclick = () => route('/instances');
+  left.appendChild(backBtn);
+
+  const inst = instances.find(item => Number(item.id) === Number(id));
+  if (!inst) {
+    left.appendChild(el('h1', '', 'Инстанс не найден'));
+    left.appendChild(el('p', 'sub', 'Возможно, он удалён или номер в ссылке неверный.'));
+    head.appendChild(left);
+    frame.main.appendChild(head);
+    app.appendChild(frame.shell);
+    return;
+  }
+
+  const displayName = instanceDisplayName(inst);
+  const displayURI = withInstanceName(inst.uri, displayName);
+  const agg = fmtInstanceHistory(inst);
+  const state = fmtInstanceState(inst, agg);
+  const isRunning = inst.status === 'running';
+  const peers = Number(inst.active_peers) || 0;
+
+  left.appendChild(el('h1', '', displayName));
+  const subBits = [inst.transport, inst.carrier].filter(Boolean).join(', ');
+  const subParts = [];
+  if (subBits) subParts.push(subBits);
+  if (inst.uptime) subParts.push('работает ' + inst.uptime);
+  left.appendChild(el('p', 'sub', subParts.join(', ')));
+  head.appendChild(left);
+
+  const headActions = el('div', '');
+  headActions.style.display = 'flex';
+  headActions.style.gap = 'var(--s-2)';
+  const pingBtn = el('button', 'btn btn-ghost', 'Проверить связь');
+  pingBtn.onclick = () => pingInstance(inst, pingBtn);
+  const qrBtn = el('button', 'btn btn-ghost', 'QR');
+  qrBtn.onclick = () => openInstanceQR(inst, displayName, qrBtn);
+  const powerBtn = el('button', isRunning ? 'btn btn-danger' : 'btn btn-primary', isRunning ? 'Остановить' : 'Запустить');
+  powerBtn.onclick = async () => {
+    const action = isRunning ? 'stop' : 'start';
+    if (action === 'stop' && !(await confirmBusyInstance(inst, 'Остановить'))) return;
+    await withLoading(powerBtn, async () => {
+      try {
+        await api('/instances/' + inst.id + '/' + action, { method: 'POST' });
+        showToast(action === 'stop' ? 'Остановлено' : 'Запущено');
+        render();
+      } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
+    });
+  };
+  headActions.appendChild(pingBtn);
+  headActions.appendChild(qrBtn);
+  headActions.appendChild(powerBtn);
+  head.appendChild(headActions);
+  frame.main.appendChild(head);
+
+  const body = el('div', 'body');
+
+  // Panel 1: the hour, drawn the mockup's way, with the page's own facts.
+  const channelPanel = el('section', 'panel');
+  const channelHead = el('div', 'panel-head');
+  channelHead.appendChild(el('h2', '', 'Канал за час'));
+  const stateEl = el('div', 'state ' + state.cls);
+  stateEl.appendChild(document.createTextNode(state.word + (state.why ? ' ' : '')));
+  if (state.why) stateEl.appendChild(el('span', 'state-note', state.why));
+  channelHead.appendChild(stateEl);
+  channelPanel.appendChild(channelHead);
+
+  const channelBody = el('div', '');
+  channelBody.style.padding = 'var(--s-4)';
+  channelBody.style.display = 'flex';
+  channelBody.style.flexDirection = 'column';
+  channelBody.style.gap = 'var(--s-4)';
+  if (agg.runs.length) {
+    const rail = el('i', 'rail');
+    rail.setAttribute('style', 'height: 26px; background-image: ' + fmtRailGradient(agg));
+    rail.setAttribute('aria-label', 'история канала за час, минута на деление');
+    channelBody.appendChild(rail);
+    const labels = el('div', 'rail-label');
+    labels.appendChild(el('span', '', '−60 мин'));
+    labels.appendChild(el('span', '', '−30 мин'));
+    labels.appendChild(el('span', '', 'сейчас'));
+    channelBody.appendChild(labels);
+  } else {
+    channelBody.appendChild(el('div', 'rail-empty', 'истории пока нет, рейка начнётся с первой минуты'));
+  }
+
+  const bytesKnown = agg.history.some(slot => slot && typeof slot.bytes === 'number');
+  const hourBytes = agg.history.reduce((sum, slot) => sum + (slot && typeof slot.bytes === 'number' ? slot.bytes : 0), 0);
+  const channelFacts = el('div', 'facts');
+  channelFacts.style.padding = '0';
+  channelFacts.style.gridTemplateColumns = 'repeat(auto-fit, minmax(140px, 1fr))';
+  channelFacts.appendChild(makeFact('Объём', bytesKnown ? fmtByteVolume(hourBytes) : 'нет данных'));
+  channelFacts.appendChild(makeFact('Клиентов на канале', String(peers)));
+  channelFacts.appendChild(makeFact('Uptime', inst.uptime || '-'));
+  channelFacts.appendChild(makeFact('Разрывов за час', String(agg.breaks)));
+  channelFacts.appendChild(makeFact('Минут в буфере', agg.history.length + ' из 60'));
+  channelBody.appendChild(channelFacts);
+  channelPanel.appendChild(channelBody);
+  body.appendChild(channelPanel);
+
+  // Panel 2: what a client needs, then the service facts and the log tail.
+  const connPanel = el('section', 'panel');
+  const connHead = el('div', 'panel-head');
+  connHead.appendChild(el('h2', '', 'Подключение'));
+  connHead.appendChild(el('span', 'hint', 'клиент видит инстанс по QR и ссылке'));
+  connPanel.appendChild(connHead);
+  const connFacts = el('div', 'facts');
+  connFacts.appendChild(makeFact(inst.carrier === 'openflux' ? 'Ссылка на документ' : 'Комната', inst.room_id || '—'));
+  const codecBits = [];
+  if (inst.openflux_codec) codecBits.push(inst.openflux_codec);
+  if (inst.vp8_fps) codecBits.push(inst.vp8_fps + ' fps');
+  if (inst.vp8_batch) codecBits.push('пакет ' + inst.vp8_batch);
+  connFacts.appendChild(makeFact('Кодек', codecBits.join(', ') || '-'));
+  connFacts.appendChild(makeFact('Выход', sys.public_ip || '-'));
+  connFacts.appendChild(makeFact('Клиентов на канале', String(peers)));
+  connPanel.appendChild(connFacts);
+
+  const more = el('details', 'more');
+  more.appendChild(el('summary', '', 'Служебное: токен авторизации, лимиты, лог'));
+  const moreFacts = el('div', 'facts');
+  const tokenValue = inst.has_auth_token
+    ? ('задан' + (inst.auth_token_expires_at ? ', истекает ' + new Date(inst.auth_token_expires_at * 1000).toLocaleDateString() : ''))
+    : 'не задан';
+  moreFacts.appendChild(makeFact('Токен авторизации', tokenValue));
+  if (inst.carrier === 'openflux') {
+    moreFacts.appendChild(makeFact('Шифрование', inst.has_openflux_key ? 'AES-256-GCM' : 'без шифрования'));
+  }
+  if (inst.client_id) moreFacts.appendChild(makeFact('Client ID', inst.client_id));
+  if (inst.dns) moreFacts.appendChild(makeFact('DNS', inst.dns));
+  if (inst.socks_proxy) moreFacts.appendChild(makeFact('SOCKS', inst.socks_proxy));
+  if (inst.warp_proxy) moreFacts.appendChild(makeFact('WARP', inst.warp_proxy));
+  more.appendChild(moreFacts);
+  const logPre = el('pre', 'num');
+  logPre.style.margin = 'var(--s-3) 0 0';
+  logPre.style.padding = 'var(--s-3)';
+  logPre.style.background = 'var(--bg-deep)';
+  logPre.style.border = '1px solid var(--line)';
+  logPre.style.borderRadius = 'var(--r-1)';
+  logPre.style.fontSize = 'var(--fs-11)';
+  logPre.style.color = 'var(--ink-muted)';
+  logPre.style.overflowX = 'auto';
+  logPre.textContent = 'Загрузка...';
+  more.appendChild(logPre);
+  // The log is only fetched when the disclosure is opened: the page should not
+  // pay for 20 lines of journal on every visit.
+  more.addEventListener('toggle', async () => {
+    if (!more.open) return;
+    try {
+      const data = await api('/system/logs/olcrtc-server@' + inst.id + '?lines=20');
+      logPre.textContent = data.logs || '(пусто)';
+    } catch (e) {
+      logPre.textContent = 'Ошибка: ' + e.message;
+    }
+  });
+  connPanel.appendChild(more);
+  body.appendChild(connPanel);
+
+  // Panel 3: the actions the mockup groups here.
+  const actPanel = el('section', 'panel');
+  const actHead = el('div', 'panel-head');
+  actHead.appendChild(el('h2', '', 'Действия'));
+  actHead.appendChild(el('span', 'hint', 'второстепенное живёт в «Конфиге»'));
+  actPanel.appendChild(actHead);
+  const actFacts = el('div', 'facts');
+
+  const linkCell = el('div', '');
+  linkCell.appendChild(el('div', 'fact-k', 'Ссылка для клиента'));
+  const linkRow = el('div', 'fact-v');
+  const copyBtn = el('button', 'btn btn-ghost btn-sm', 'Скопировать');
+  copyBtn.onclick = () => {
+    navigator.clipboard.writeText(displayURI);
+    showToast('URI скопирован');
+  };
+  const openQrBtn = el('button', 'btn btn-ghost btn-sm', 'Открыть QR');
+  openQrBtn.onclick = () => openInstanceQR(inst, displayName, openQrBtn);
+  linkRow.appendChild(copyBtn);
+  linkRow.appendChild(document.createTextNode(' '));
+  linkRow.appendChild(openQrBtn);
+  linkCell.appendChild(linkRow);
+  actFacts.appendChild(linkCell);
+
+  const cfgCell = el('div', '');
+  cfgCell.appendChild(el('div', 'fact-k', 'Конфигурация'));
+  const cfgRow = el('div', 'fact-v');
+  const editBtn = el('button', 'btn btn-ghost btn-sm', 'Изменить');
+  editBtn.onclick = () => showConfigModal(inst);
+  cfgRow.appendChild(editBtn);
+  cfgCell.appendChild(cfgRow);
+  actFacts.appendChild(cfgCell);
+
+  const svcCell = el('div', '');
+  svcCell.appendChild(el('div', 'fact-k', 'Сервис'));
+  const svcRow = el('div', 'fact-v');
+  const restartBtn = el('button', 'btn btn-ghost btn-sm', 'Перезапустить');
+  restartBtn.onclick = async () => {
+    if (!(await confirmBusyInstance(inst, 'Перезапустить'))) return;
+    await withLoading(restartBtn, async () => {
+      try {
+        await api('/instances/' + inst.id + '/restart', { method: 'POST' });
+        showToast('Перезапущено');
+        render();
+      } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
+    });
+  };
+  const logsBtn = el('button', 'btn btn-ghost btn-sm', 'Логи');
+  logsBtn.onclick = () => showLogsModal('olcrtc-server@' + inst.id);
+  svcRow.appendChild(restartBtn);
+  svcRow.appendChild(document.createTextNode(' '));
+  svcRow.appendChild(logsBtn);
+  svcCell.appendChild(svcRow);
+  actFacts.appendChild(svcCell);
+
+  actPanel.appendChild(actFacts);
+  body.appendChild(actPanel);
+
+  frame.main.appendChild(body);
+  app.appendChild(frame.shell);
+  startUsagePolling();
 }
 
 function metaRow(label, value, copyValue) {
