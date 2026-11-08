@@ -44,6 +44,14 @@
   margin-top: 2px;
   overflow-wrap: break-word;
 }
+/* A warning that stops a channel from coming up stays on the row, not only in
+   the disclosure: it answers "why is it not working", not "what is it". */
+.vl-warn {
+  font-size: var(--fs-11);
+  font-weight: 600;
+  color: var(--st-warn);
+  margin-top: var(--s-1);
+}
 
 /* The channel cell: the state word above its hour, both from the same history,
    so the word is for reading and the rail is for scanning. */

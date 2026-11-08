@@ -929,6 +929,22 @@ function renderInstanceIdentity(inst, context, displayName) {
   const sub = el('div', 'vl-sub', groupTag + '#' + inst.id + ' · ' + (inst.label || ''));
   if (inst.name && inst.name !== displayName) sub.title = 'Имя в конфигурации: ' + inst.name;
   box.appendChild(sub);
+
+  // Wbstream cannot start without a room and cannot connect with an expired
+  // token. Those were amber badges; they stay on the row as a warning line,
+  // because they say why the channel will not come up, not just what it is.
+  if (inst.carrier === 'wbstream' && (!inst.room_id || inst.room_id === 'any')) {
+    const warn = el('div', 'vl-warn', 'нужен Room ID');
+    warn.title = 'wbstream больше не создаёт румы автоматически: задайте Room ID в настройках инстанса';
+    box.appendChild(warn);
+  }
+  if (inst.carrier === 'wbstream' && inst.auth_token_expired) {
+    const warn = el('div', 'vl-warn', 'токен истёк');
+    warn.title = inst.auth_token_expires_at
+      ? 'Истёк ' + new Date(inst.auth_token_expires_at * 1000).toLocaleString()
+      : 'Обновите общий WB-токен в Настройках';
+    box.appendChild(warn);
+  }
   return box;
 }
 
