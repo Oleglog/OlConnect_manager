@@ -21,6 +21,12 @@ type SystemctlStatus struct {
 	State  string `json:"state"`
 	Active string `json:"active"`
 	Uptime string `json:"uptime"`
+	// Restarts is systemd's own restart counter (NRestarts) and EnterUnix is
+	// ActiveEnterTimestamp in unix seconds. The panel's minute history needs both:
+	// ActiveState alone cannot show a restart inside a minute, because a unit that
+	// crash-loops is "active" at every sample.
+	Restarts  int   `json:"restarts,omitempty"`
+	EnterUnix int64 `json:"enter_unix,omitempty"`
 }
 
 // SystemctlRun runs a systemctl command and returns combined output.
@@ -89,7 +95,8 @@ func SystemctlStatusInfo(service string) (*SystemctlStatus, error) {
 	out, err := SystemctlRun("show", service,
 		"--property=ActiveState",
 		"--property=SubState",
-		"--property=ActiveEnterTimestamp")
+		"--property=ActiveEnterTimestamp",
+		"--property=NRestarts")
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +112,9 @@ func SystemctlStatusInfo(service string) (*SystemctlStatus, error) {
 		if strings.HasPrefix(line, "SubState=") {
 			st.State = strings.TrimPrefix(line, "SubState=")
 		}
+		if strings.HasPrefix(line, "NRestarts=") {
+			st.Restarts, _ = strconv.Atoi(strings.TrimPrefix(line, "NRestarts="))
+		}
 		if strings.HasPrefix(line, "ActiveEnterTimestamp=") {
 			ts := strings.TrimPrefix(line, "ActiveEnterTimestamp=")
 			if ts != "" {
@@ -119,6 +129,7 @@ func SystemctlStatusInfo(service string) (*SystemctlStatus, error) {
 
 	if !enterTime.IsZero() {
 		st.Uptime = formatDuration(time.Since(enterTime))
+		st.EnterUnix = enterTime.Unix()
 	}
 	return st, nil
 }

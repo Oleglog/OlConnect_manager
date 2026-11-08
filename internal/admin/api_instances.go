@@ -63,6 +63,13 @@ type Instance struct {
 	UsageKnown              bool   `json:"usage_known"`
 	OldestConnectedAt       string `json:"oldest_connected_at,omitempty"`
 	UsageUpdatedAt          string `json:"usage_updated_at,omitempty"`
+	// History is the last hour of the channel as the panel draws it: one slot per
+	// minute, oldest first, empty until the first minute is recorded.
+	// HistorySince is the timestamp of its first slot (0 when there is none) and
+	// HistoryComplete says whether the ring already covers all 60 minutes.
+	History         []InstanceHistorySlot `json:"history"`
+	HistorySince    int64                 `json:"history_since"`
+	HistoryComplete bool                  `json:"history_complete"`
 }
 
 func (s *Server) handleInstancesList(w http.ResponseWriter, r *http.Request) {
@@ -998,6 +1005,7 @@ func (s *Server) buildInstance(id int) Instance {
 		uptime = st.Uptime
 	}
 	usage := readInstanceUsage(id, status == "running" || status == "active")
+	history, historySince, historyComplete := s.instanceHistoryFor(id)
 
 	return Instance{
 		ID:                      id,
@@ -1035,6 +1043,9 @@ func (s *Server) buildInstance(id int) Instance {
 		UsageKnown:              usage.UsageKnown,
 		OldestConnectedAt:       usage.OldestConnectedAt,
 		UsageUpdatedAt:          usage.UpdatedAt,
+		History:                 history,
+		HistorySince:            historySince,
+		HistoryComplete:         historyComplete,
 	}
 }
 

@@ -43,6 +43,8 @@ type Server struct {
 	mu            sync.RWMutex
 	lastBadIPs    map[string]time.Time // simple rate-limit memory
 	wbAutomation  *wbAutomationManager
+	// history is the per-instance minute ring behind /api/instances.
+	history *instanceHistory
 }
 
 // NewServer creates a new admin server.
@@ -53,6 +55,7 @@ func NewServer(cfg Config) *Server {
 		subscriptions: newAdminSubscriptionBackend(cfg),
 		lastBadIPs:    make(map[string]time.Time),
 		wbAutomation:  newWBAutomationManager(),
+		history:       newInstanceHistory(instanceHistoryPath(cfg)),
 	}
 
 	s.setupRoutes()
@@ -101,6 +104,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.subscriptions.start(ctx); err != nil {
 		log.Printf("Subscription backend unavailable: %v", err)
 	}
+	s.startInstanceHistory(ctx)
 
 	addr := fmt.Sprintf(":%d", s.cfg.Port)
 	s.srv = &http.Server{
